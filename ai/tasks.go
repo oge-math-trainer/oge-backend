@@ -4,23 +4,39 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
+// cleanLatex убирает LaTeX-разметку которую добавляют некоторые модели
 func cleanLatex(s string) string {
 	s = strings.ReplaceAll(s, `\(`, "")
 	s = strings.ReplaceAll(s, `\)`, "")
 	s = strings.ReplaceAll(s, `\[`, "")
 	s = strings.ReplaceAll(s, `\]`, "")
-	s = strings.ReplaceAll(s, `\cdot`, "×")
+	s = strings.ReplaceAll(s, `\cdot`, "x")
 	s = strings.ReplaceAll(s, "→", "=>")
 	s = strings.ReplaceAll(s, "≠", "!=")
 	s = strings.ReplaceAll(s, "≤", "<=")
 	s = strings.ReplaceAll(s, "≥", ">=")
 	s = strings.ReplaceAll(s, "±", "+/-")
 	return s
+}
+
+// validAnswerRe проверяет что ответ содержит только цифры, запятую и минус
+var validAnswerRe = regexp.MustCompile(`^-?[0-9]+(,[0-9]+)?$`)
+
+func validateAnswer(answer string) error {
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return fmt.Errorf("correct_answer пустой")
+	}
+	if !validAnswerRe.MatchString(answer) {
+		return fmt.Errorf("correct_answer содержит недопустимые символы: %q", answer)
+	}
+	return nil
 }
 
 // IsConfigured проверяет что клиент настроен (ключ задан)
@@ -44,10 +60,10 @@ Return exactly this structure:
 }
 Rules:
 - All text in Russian
-- correct_answer must contain only digits (0-9), minus (-), comma (,)
+- correct_answer must contain only digits (0-9), minus (-), comma (,). No spaces, no letters, no dots.
 - solution_steps minimum 3 steps, maximum 7
 - Problem must match real OGE difficulty for 9th grade
-- Do NOT use LaTeX, arrows (→), or any special math symbols. Use plain text only: instead of \( x^2 \) write x^2, instead of → write =>.`
+- Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.`
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
@@ -62,15 +78,21 @@ Rules:
 	}
 
 	raw, err := c.Chat(systemPrompt, string(inputBytes), 800, 0.7)
-
 	if err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
 	}
 
-	var result tasks.GeneratedContent
+	// cleanLatex вызывается ДО json.Unmarshal
 	raw = cleanLatex(raw)
+
+	var result tasks.GeneratedContent
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: не удалось распарсить ответ AI: %w", err)
+	}
+
+	// валидация correct_answer
+	if err := validateAnswer(result.CorrectAnswer); err != nil {
+		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
 	}
 
 	return result, nil
@@ -93,16 +115,19 @@ Rules:
 - Normalize answers: treat comma and dot as decimal separator, ignore leading zeros
 - Do NOT use LaTeX, arrows, or special math symbols. Use plain text only.`
 
-	type explainInput struct {
+	// studentAnswer передаётся в промпт
+	type checkInput struct {
 		Question      string `json:"question"`
 		CorrectAnswer string `json:"correct_answer"`
+		StudentAnswer string `json:"student_answer"`
 	}
-	inputBytes, err := json.Marshal(explainInput{
+	inputBytes, err := json.Marshal(checkInput{
 		Question:      task.Question,
 		CorrectAnswer: task.CorrectAnswer,
+		StudentAnswer: studentAnswer,
 	})
 	if err != nil {
-		return tasks.CheckResult{}, fmt.Errorf("Explain: %w", err)
+		return tasks.CheckResult{}, fmt.Errorf("CheckAnswer: %w", err)
 	}
 
 	raw, err := c.Chat(systemPrompt, string(inputBytes), 300, 0.2)
@@ -110,8 +135,10 @@ Rules:
 		return tasks.CheckResult{}, fmt.Errorf("CheckAnswer: %w", err)
 	}
 
-	var result tasks.CheckResult
+	// cleanLatex вызывается ДО json.Unmarshal
 	raw = cleanLatex(raw)
+
+	var result tasks.CheckResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return tasks.CheckResult{}, fmt.Errorf("CheckAnswer: не удалось распарсить ответ AI: %w", err)
 	}
@@ -136,16 +163,14 @@ Rules:
 - Maximum 2 sentences
 - Do NOT use LaTeX, arrows, or special math symbols. Use plain text only.`
 
-	type explainInput struct {
-		Question      string `json:"question"`
-		CorrectAnswer string `json:"correct_answer"`
+	type hintInput struct {
+		Question string `json:"question"`
 	}
-	inputBytes, err := json.Marshal(explainInput{
-		Question:      task.Question,
-		CorrectAnswer: task.CorrectAnswer,
+	inputBytes, err := json.Marshal(hintInput{
+		Question: task.Question,
 	})
 	if err != nil {
-		return tasks.HintResult{}, fmt.Errorf("Explain: %w", err)
+		return tasks.HintResult{}, fmt.Errorf("Hint: %w", err)
 	}
 
 	raw, err := c.Chat(systemPrompt, string(inputBytes), 300, 0.6)
@@ -153,10 +178,12 @@ Rules:
 		return tasks.HintResult{}, fmt.Errorf("Hint: %w", err)
 	}
 
+	// cleanLatex вызывается ДО json.Unmarshal
+	raw = cleanLatex(raw)
+
 	var parsed struct {
 		Hint string `json:"hint"`
 	}
-	raw = cleanLatex(raw)
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return tasks.HintResult{}, fmt.Errorf("Hint: не удалось распарсить ответ AI: %w", err)
 	}
@@ -198,8 +225,10 @@ Rules:
 		return tasks.ExplainResult{}, fmt.Errorf("Explain: %w", err)
 	}
 
-	var result tasks.ExplainResult
+	// cleanLatex вызывается ДО json.Unmarshal
 	raw = cleanLatex(raw)
+
+	var result tasks.ExplainResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		return tasks.ExplainResult{}, fmt.Errorf("Explain: не удалось распарсить ответ AI: %w", err)
 	}
