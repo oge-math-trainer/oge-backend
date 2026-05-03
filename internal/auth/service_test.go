@@ -9,7 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 
-	"oge-ai-trainer/backend/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 func TestRegisterHashesPasswordAndReturnsToken(t *testing.T) {

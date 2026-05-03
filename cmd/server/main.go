@@ -9,14 +9,14 @@ import (
 	"syscall"
 	"time"
 
-	"oge-ai-trainer/backend/internal/ai"
-	"oge-ai-trainer/backend/internal/api"
-	"oge-ai-trainer/backend/internal/auth"
-	"oge-ai-trainer/backend/internal/config"
-	"oge-ai-trainer/backend/internal/db"
-	"oge-ai-trainer/backend/internal/diagnostic"
-	"oge-ai-trainer/backend/internal/progress"
-	"oge-ai-trainer/backend/internal/tasks"
+	"github.com/oge-math-trainer/oge-backend.git/internal/ai"
+	"github.com/oge-math-trainer/oge-backend.git/internal/api"
+	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
+	"github.com/oge-math-trainer/oge-backend.git/internal/config"
+	"github.com/oge-math-trainer/oge-backend.git/internal/db"
+	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
+	"github.com/oge-math-trainer/oge-backend.git/internal/progress"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 func main() {

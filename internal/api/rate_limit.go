@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"oge-ai-trainer/backend/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 type rateLimiter struct {

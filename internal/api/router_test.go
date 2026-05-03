@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"oge-ai-trainer/backend/internal/app"
-	"oge-ai-trainer/backend/internal/auth"
-	"oge-ai-trainer/backend/internal/diagnostic"
-	"oge-ai-trainer/backend/internal/progress"
-	"oge-ai-trainer/backend/internal/tasks"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
+	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
+	"github.com/oge-math-trainer/oge-backend.git/internal/progress"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 func TestHealthReturnsDBStatus(t *testing.T) {

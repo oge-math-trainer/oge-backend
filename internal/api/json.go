@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"oge-ai-trainer/backend/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 const maxJSONBodyBytes = 1 << 20

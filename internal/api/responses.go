@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"oge-ai-trainer/backend/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 type successResponse struct {

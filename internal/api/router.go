@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"oge-ai-trainer/backend/internal/auth"
-	"oge-ai-trainer/backend/internal/diagnostic"
-	"oge-ai-trainer/backend/internal/progress"
-	"oge-ai-trainer/backend/internal/tasks"
+	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
+	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
+	"github.com/oge-math-trainer/oge-backend.git/internal/progress"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 type AuthService interface {

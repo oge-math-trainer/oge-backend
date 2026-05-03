@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"oge-ai-trainer/backend/internal/app"
-	"oge-ai-trainer/backend/internal/tasks"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 func TestSubmitChecksSessionOwnerBeforeAI(t *testing.T) {

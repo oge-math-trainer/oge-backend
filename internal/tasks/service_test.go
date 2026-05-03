@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"oge-ai-trainer/backend/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 func TestGenerateWithoutAIKeyReturnsAIUnavailable(t *testing.T) {

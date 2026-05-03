@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"oge-ai-trainer/backend/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 const (

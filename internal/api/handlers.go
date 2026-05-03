@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strings"
 
-	"oge-ai-trainer/backend/internal/app"
-	"oge-ai-trainer/backend/internal/diagnostic"
-	"oge-ai-trainer/backend/internal/tasks"
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 type credentialsRequest struct {
