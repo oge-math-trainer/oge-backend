@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/joho/godotenv"
@@ -10,6 +11,9 @@ import (
 
 func TestChat(t *testing.T) {
 	godotenv.Load(".env")
+	if os.Getenv("AITUNNEL_API_KEY") == "" {
+		t.Skip("AITUNNEL_API_KEY is not set; skipping external AI integration test")
+	}
 
 	client, err := ai.NewClient()
 	if err != nil {
