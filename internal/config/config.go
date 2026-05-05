@@ -17,9 +17,9 @@ type Config struct {
 	AuthRateLimitRequests int
 	AuthRateLimitWindow   time.Duration
 	CORSAllowedOrigins    []string
-	OpenRouterBaseURL     string
-	OpenRouterAPIKey      string
-	OpenRouterModel       string
+	AITunnelBaseURL     string
+	AITunnelAPIKey      string
+	AITunnelModel       string
 }
 
 func Load(path string) (Config, error) {
@@ -81,9 +81,9 @@ func Load(path string) (Config, error) {
 		AuthRateLimitRequests: rateLimitRequests,
 		AuthRateLimitWindow:   rateLimitWindow,
 		CORSAllowedOrigins:    origins,
-		OpenRouterBaseURL:     envOrDefault("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-		OpenRouterAPIKey:      strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
-		OpenRouterModel:       strings.TrimSpace(os.Getenv("OPENROUTER_MODEL")),
+		AITunnelBaseURL:     envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
+		AITunnelAPIKey:      strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
+		AITunnelModel:       strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
 	}, nil
 }
 
@@ -106,8 +106,8 @@ func (c Config) ValidateServer() error {
 	if c.AuthRateLimitWindow <= 0 {
 		return errors.New("AUTH_RATE_LIMIT_WINDOW must be positive")
 	}
-	if c.OpenRouterAPIKey != "" && c.OpenRouterModel == "" {
-		return errors.New("OPENROUTER_MODEL is required when OPENROUTER_API_KEY is set")
+	if c.AITunnelAPIKey != "" && c.AITunnelModel == "" {
+    return errors.New("AITUNNEL_MODEL is required when AITUNNEL_API_KEY is set")
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
 		return errors.New("PORT must be a number")
