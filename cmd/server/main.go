@@ -37,7 +37,7 @@ func main() {
 	}
 	defer store.Close()
 
-	aiClient := ai.NewClient(cfg.OpenRouterBaseURL, cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
+	aiClient := ai.NewClient(cfg.AITunnelBaseURL, cfg.AITunnelAPIKey, cfg.AITunnelModel)
 	authService := auth.NewService(store, cfg.AuthSecret, cfg.TokenTTL)
 	taskService := tasks.NewService(store, aiClient)
 	diagnosticService := diagnostic.NewService(store, taskService, aiClient)
