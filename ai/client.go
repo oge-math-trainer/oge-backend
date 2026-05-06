@@ -60,7 +60,7 @@ func NewClient() (*Client, error) {
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		model:   "qwen3-235b-a22b-2507", // меняй при необходимости
+		model:   "qwen/qwen3-235b-a22b-2507", // меняй при необходимости
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
