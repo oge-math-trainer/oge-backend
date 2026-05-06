@@ -78,6 +78,7 @@ Rules:
 	}
 
 	raw, err := c.Chat(systemPrompt, string(inputBytes), 800, 0.7)
+	fmt.Println("RAW:", raw)
 	if err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
 	}
