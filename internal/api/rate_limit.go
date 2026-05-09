@@ -64,6 +64,11 @@ func (l *rateLimiter) allow(key string) bool {
 
 func (s *Server) authRateLimit(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// убрать потом --------------------------------------------------------------------------
+		log.Printf("🔍 INCOMING: %s %s | RemoteAddr: %s", r.Method, r.URL.Path, r.RemoteAddr)
+		
+		requestID := strings.TrimSpace(r.Header.Get(requestIDHeader))
+		// убрать потом --------------------------------------------------------------------------
 		key := remoteIP(r) + ":" + r.URL.Path
 		if s.authLimiter != nil && !s.authLimiter.allow(key) {
 			log.Printf("auth rate limit exceeded: request_id=%s ip=%s path=%s", requestIDFromContext(r.Context()), remoteIP(r), r.URL.Path)
