@@ -18,6 +18,9 @@ const requestIDHeader = "X-Request-ID"
 
 func (s *Server) requestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// убрать потом
+		log.Printf("🔍 INCOMING: %s %s | RemoteAddr: %s", r.Method, r.URL.Path, r.RemoteAddr)
+		// убрать потом
 		requestID := strings.TrimSpace(r.Header.Get(requestIDHeader))
 		if requestID == "" || len(requestID) > 128 {
 			requestID = newRequestID()
