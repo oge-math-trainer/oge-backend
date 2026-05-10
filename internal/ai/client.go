@@ -111,7 +111,8 @@ func (c *Client) AnalyzeDiagnostic(ctx context.Context, answers []diagnostic.Ans
 
 func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error {
 	if !c.IsConfigured() {
-		return app.AIUnavailable(errors.New("OPENROUTER_API_KEY is empty"))
+		// ✅ Исправлено: сообщение об ошибке
+		return app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
 
 	body := chatRequest{
@@ -131,10 +132,13 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 	if err != nil {
 		return app.Internal(err)
 	}
+	
+	// ✅ Стандартные заголовки для OpenAI-совместимых API
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("HTTP-Referer", "http://localhost")
-	req.Header.Set("X-Title", "oge-ai-trainer")
+	// ❌ Удалены заголовки специфичные для OpenRouter:
+	// req.Header.Set("HTTP-Referer", ...)
+	// req.Header.Set("X-Title", ...)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -147,7 +151,8 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		return app.AIUnavailable(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return app.AIUnavailable(fmt.Errorf("openrouter status %d", resp.StatusCode))
+		// ✅ Исправлено: более информативная ошибка
+		return app.AIUnavailable(fmt.Errorf("ai service status %d: %s", resp.StatusCode, string(respBody)))
 	}
 
 	var chatResp chatResponse
@@ -155,7 +160,8 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		return app.AIUnavailable(err)
 	}
 	if len(chatResp.Choices) == 0 {
-		return app.AIUnavailable(errors.New("openrouter returned no choices"))
+		// ✅ Исправлено: сообщение об ошибке
+		return app.AIUnavailable(errors.New("ai service returned no choices"))
 	}
 
 	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
