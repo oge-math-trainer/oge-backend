@@ -65,13 +65,43 @@ Rules:
 - Problem must match real OGE difficulty for 9th grade
 - Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.
 - Mathematical problems should not be based on pictures and should not require pictures to solve them.
-- SPECIAL RULE FOR oge_number 11: if oge_number is 11, you MUST add a "graphs" field to the JSON.
-  "graphs" is an array of 1 to 4 objects depending on the task type.
-  Each object has fields:
-  "id" (string "1","2","3"...), "formula" (function equation as plain text, e.g. "y = 2x + 1"), "type" (one of: "linear", "quadratic", "hyperbola").
-  If the task requires matching graphs to formulas, "correct_answer" must be like "1-A,2-B,3-C".
-  If the task requires determining coefficient signs from one graph, "correct_answer" is a normal answer like "a>0,b<0".
-  For all other oge_number values, do NOT include the "graphs" field.`
+- SPECIAL RULE FOR oge_number 11:
+  if oge_number is 11, you MUST add a "graphs" field to the JSON.
+
+"graphs" is an array of 1 to 4 objects depending on the task type.
+
+Each graph object must contain:
+
+{
+	"id": "1",
+	"type": "linear" | "quadratic" | "hyperbola",
+	"coefficients": [numbers],
+	"x_min": -10,
+	"x_max": 10,
+	"y_min": -10,
+	"y_max": 10
+}
+
+Rules for graph types:
+* linear:
+  y = ax + b
+  coefficients format: [a, b]
+* quadratic:
+  y = ax^2 + bx + c
+  coefficients format: [a, b, c]
+* hyperbola:
+  y = k / x
+  coefficients format: [k]
+Rules:
+- coefficients must contain only numbers
+- all ranges must be integers
+- do NOT include formula strings
+- do NOT include LaTeX
+- graphs must be mathematically correct
+
+If the task requires matching graphs to formulas, "correct_answer" must be like "1-A,2-B,3-C".
+
+For all other oge_number values, do NOT include the "graphs" field.`
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
