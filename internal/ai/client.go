@@ -40,16 +40,30 @@ func (c *Client) IsConfigured() bool {
 
 func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
 	var out tasks.GeneratedContent
+	
+	// 🔧 Расширенный промпт с поддержкой графиков для №11
+	graphsRule := ""
+	if target.OgeNumber == 11 {
+		graphsRule = `
+6. СПЕЦИАЛЬНО ДЛЯ oge_number=11: добавь поле "graphs" — массив из 1-4 объектов.
+   Каждый объект: {"id":"1","type":"linear|quadratic|hyperbola","coefficients":[числа],"x_min":-10,"x_max":10,"y_min":-10,"y_max":10}
+   - linear: y=ax+b → coefficients=[a,b]
+   - quadratic: y=ax²+bx+c → coefficients=[a,b,c]  
+   - hyperbola: y=k/x → coefficients=[k]
+   - Все коэффициенты — только числа, без формул и LaTeX.`
+	}
+	
 	prompt := fmt.Sprintf(`Ты — составитель заданий ОГЭ по математике (6-19).
 Параметры: oge_number=%d, subtype_code=%s.
 Требования:
 1. Условие текстовое, без рисунков и таблиц, уровень base/middle.
-2. Ответ — однозначное число или десятичная дробь.
-3. Реши задачу пошагово.
+2. Ответ — однозначное число или десятичная дробь (только цифры, запятая, минус).
+3. Реши задачу пошагово (минимум 3 шага).
 4. Самопроверь ответ.
-5. Верни только JSON:
-{"question":"текст","correct_answer":"число","solution_steps":["шаг 1"],"self_check":"проверка","is_valid":true,"validation_notes":"соответствует ОГЭ"}`,
-		target.OgeNumber, target.SubtypeCode)
+5. Верни ТОЛЬКО валидный JSON без markdown, без пояснений, начинай с { и заканчивай }:
+{"question":"текст","correct_answer":"число","solution_steps":["шаг 1"],"self_check":"проверка","is_valid":true,"validation_notes":"соответствует ОГЭ"}%s`,
+		target.OgeNumber, target.SubtypeCode, graphsRule)
+		
 	if err := c.completeJSON(ctx, prompt, &out); err != nil {
 		return tasks.GeneratedContent{}, err
 	}
@@ -111,7 +125,6 @@ func (c *Client) AnalyzeDiagnostic(ctx context.Context, answers []diagnostic.Ans
 
 func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error {
 	if !c.IsConfigured() {
-		// ✅ Исправлено: сообщение об ошибке
 		return app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
 
@@ -133,12 +146,8 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		return app.Internal(err)
 	}
 	
-	// ✅ Стандартные заголовки для OpenAI-совместимых API
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	// ❌ Удалены заголовки специфичные для OpenRouter:
-	// req.Header.Set("HTTP-Referer", ...)
-	// req.Header.Set("X-Title", ...)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -151,7 +160,6 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		return app.AIUnavailable(err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		// ✅ Исправлено: более информативная ошибка
 		return app.AIUnavailable(fmt.Errorf("ai service status %d: %s", resp.StatusCode, string(respBody)))
 	}
 
@@ -160,32 +168,52 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		return app.AIUnavailable(err)
 	}
 	if len(chatResp.Choices) == 0 {
-		// ✅ Исправлено: сообщение об ошибке
 		return app.AIUnavailable(errors.New("ai service returned no choices"))
 	}
 
 	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
 
-// Чистим markdown блоки
-content = strings.TrimPrefix(content, "```json")
-content = strings.TrimPrefix(content, "```")
-content = strings.TrimSuffix(content, "```")
-content = strings.TrimSpace(content)
+	// Чистим markdown блоки
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
 
-// Если AI вернул текст с лишним, ищем JSON между { и }
-if !strings.HasPrefix(content, "{") {
-    start := strings.Index(content, "{")
-    end := strings.LastIndex(content, "}")
-    if start != -1 && end != -1 && end > start {
-        content = content[start : end+1]
-    }
-}
+	// Если AI вернул текст с лишним, ищем JSON между { и }
+	if !strings.HasPrefix(content, "{") {
+		start := strings.Index(content, "{")
+		end := strings.LastIndex(content, "}")
+		if start != -1 && end != -1 && end > start {
+			content = content[start : end+1]
+		}
+	}
 
-if err := json.Unmarshal([]byte(content), out); err != nil {
-    // Логируем для отладки (раскомментируй если нужно)
-    // log.Printf("AI raw response failed to parse: %s", content)
-    return app.AIUnavailable(fmt.Errorf("invalid ai json: %w", err))
-}
+	// 🔍 Логируем сырой ответ перед парсингом (Point 1 от Ангелины)
+	fmt.Println("🔍 AI RAW RESPONSE:", content)
+
+	if err := json.Unmarshal([]byte(content), out); err != nil {
+		// 🔍 Логируем конкретную ошибку парсинга (Point 2)
+		fmt.Printf("❌ JSON PARSE FAILED: %v\n", err)
+		fmt.Printf("❌ Raw content was: %.200s...\n", content) // первые 200 символов
+		return app.AIUnavailable(fmt.Errorf("invalid ai json: %w", err))
+	}
+	
+	// 🔍 Дополнительная валидация после парсинга
+	if gen, ok := out.(*tasks.GeneratedContent); ok {
+		if strings.TrimSpace(gen.Question) == "" {
+			fmt.Println("❌ VALIDATION: missing question")
+			return app.Validation("AI returned empty question")
+		}
+		if strings.TrimSpace(gen.CorrectAnswer) == "" {
+			fmt.Println("❌ VALIDATION: missing correct_answer")
+			return app.Validation("AI returned empty correct_answer")
+		}
+		if len(gen.SolutionSteps) < 3 {
+			fmt.Printf("❌ VALIDATION: solution_steps=%d (need >=3)\n", len(gen.SolutionSteps))
+			return app.Validation("AI returned too few solution steps")
+		}
+	}
+	
 	return nil
 }
 
