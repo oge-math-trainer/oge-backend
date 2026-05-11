@@ -78,6 +78,10 @@ Rules:
 - solution_steps minimum 3 steps, maximum 7
 - Problem must match real OGE difficulty for 9th grade
 - Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.
+- DO NOT use any special characters, ONLY ASCII.
+- DO NOT use any greek letters.
+- DO NOT use " or '.
+- DO NOT use line breaks.
 - Mathematical problems should not be based on pictures and should not require pictures to solve them.
 - SPECIAL RULE FOR oge_number 11:
 
