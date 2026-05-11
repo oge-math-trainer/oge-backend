@@ -37,6 +37,13 @@ type Task struct {
 	ValidationNotes string    `json:"-"`
 	Source          string    `json:"source"`
 	CreatedAt       time.Time `json:"created_at,omitempty"`
+	Graphs          []Graph   `json:"graphs,omitempty"`
+}
+
+type Graph struct {
+	ID      string `json:"id"`
+	Formula string `json:"formula"`
+	Type    string `json:"type"`
 }
 
 type GeneratedContent struct {
@@ -46,6 +53,7 @@ type GeneratedContent struct {
 	SelfCheck       string   `json:"self_check"`
 	IsValid         bool     `json:"is_valid"`
 	ValidationNotes string   `json:"validation_notes"`
+	Graphs          []Graph  `json:"graphs,omitempty"` // только для задания №11
 }
 
 type CreateTask struct {

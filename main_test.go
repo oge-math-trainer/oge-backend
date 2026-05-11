@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"testing"
 
 	"github.com/joho/godotenv"
 	"github.com/oge-math-trainer/oge-backend.git/ai"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 func TestChat(t *testing.T) {
@@ -31,4 +33,61 @@ func TestChat(t *testing.T) {
 	}
 
 	fmt.Println(result)
+}
+
+func TestGenerateTask(t *testing.T) {
+	godotenv.Load(".env")
+
+	client, err := ai.NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target := tasks.Target{
+		OgeNumber:   4,
+		SubtypeCode: "linear_equation",
+	}
+
+	result, err := client.GenerateTask(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("Question:", result.Question)
+	fmt.Println("Answer:", result.CorrectAnswer)
+	fmt.Println("IsValid:", result.IsValid)
+	fmt.Println("Steps:", result.SolutionSteps)
+}
+
+func TestHint(t *testing.T) {
+	godotenv.Load(".env")
+	client, _ := ai.NewClient()
+
+	task := tasks.Task{
+		Question:      "Решите уравнение 3(x - 4) + 2x = 7x - 10.",
+		CorrectAnswer: "-1",
+	}
+
+	result, err := client.Hint(context.Background(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("Hint:", result.Hint)
+}
+
+func TestExplain(t *testing.T) {
+	godotenv.Load(".env")
+	client, _ := ai.NewClient()
+
+	task := tasks.Task{
+		Question:      "Решите уравнение 3(x - 4) + 2x = 7x - 10.",
+		CorrectAnswer: "-1",
+	}
+
+	result, err := client.Explain(context.Background(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("Explanation:", result.Explanation)
+	fmt.Println("Steps:", result.Steps)
 }
