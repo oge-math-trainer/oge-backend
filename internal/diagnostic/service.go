@@ -107,7 +107,7 @@ func (s *Service) Submit(ctx context.Context, userID, sessionID int64, answers [
 	}
 
 	if s.ai == nil || !s.ai.IsConfigured() {
-		return SubmitResult{}, app.AIUnavailable(errors.New("OPENROUTER_API_KEY is empty"))
+		return SubmitResult{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
 
 	results := make([]AnswerResult, 0, len(answers))
