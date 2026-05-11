@@ -14,12 +14,12 @@ import (
 func sanitizeAIResponse(raw string) string {
 	raw = strings.TrimSpace(raw)
 
-	// убрать markdown fences
+	// markdown fences
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 
-	// вытащить JSON объект
+	// extract json
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
 
@@ -27,19 +27,12 @@ func sanitizeAIResponse(raw string) string {
 		raw = raw[start : end+1]
 	}
 
-	// исправить невалидные escape sequence
-	replacer := strings.NewReplacer(
-		`\(`, `(`,
-		`\)`, `)`,
-		`\[`, `[`,
-		`\]`, `]`,
-		`\cdot`, `x`,
-		`\*`, `*`,
-		`\_`, `_`,
-		`\$`, `$`,
-	)
+	// remove invalid latex escapes like \( \) \[ \]
+	re := regexp.MustCompile(`\\+([\(\)\[\]])`)
+	raw = re.ReplaceAllString(raw, "$1")
 
-	raw = replacer.Replace(raw)
+	// normalize common latex
+	raw = strings.ReplaceAll(raw, `\cdot`, "x")
 
 	return strings.TrimSpace(raw)
 
