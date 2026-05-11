@@ -3,6 +3,8 @@ package diagnostic
 import (
 	"context"
 	"errors"
+	"fmt"  // ← ДОБАВЬ
+	"time" // ← ДОБАВЬ
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
@@ -78,19 +80,53 @@ func (s *Service) Start(ctx context.Context, userID int64) (StartResult, error) 
 	}
 
 	out := make([]tasks.Task, 0, 14)
+	
 	for _, target := range targets[:14] {
 		oge := target.OgeNumber
-		task, err := s.tasks.Generate(ctx, tasks.GenerateRequest{
-			UserID:      userID,
-			Mode:        tasks.ModeCustom,
-			StoredMode:  tasks.ModeDiagnostic,
-			OgeNumber:   &oge,
-			SubtypeCode: target.SubtypeCode,
-		})
-		if err != nil {
-			return StartResult{}, err
+		
+		// 🔁 Retry-логика: 3 попытки на задачу
+		var task tasks.Task
+		var lastErr error
+		const maxRetries = 3
+		
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			task, err = s.tasks.Generate(ctx, tasks.GenerateRequest{
+				UserID:      userID,
+				Mode:        tasks.ModeCustom,
+				StoredMode:  tasks.ModeDiagnostic,
+				OgeNumber:   &oge,
+				SubtypeCode: target.SubtypeCode,
+			})
+			if err == nil {
+				break // ✅ Успех
+			}
+			
+			lastErr = err
+			fmt.Printf("⚠️ Diagnostic task OGE#%d attempt %d/%d failed: %v\n", 
+				target.OgeNumber, attempt, maxRetries, err)
+			
+			// Небольшая пауза перед повтором
+			select {
+			case <-ctx.Done():
+				return StartResult{}, ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+				// продолжаем
+			}
 		}
+		
+		// Если после всех попыток не вышло — логируем и пропускаем задачу
+		if lastErr != nil {
+			fmt.Printf("❌ Skipped OGE#%d in diagnostic after %d attempts: %v\n", 
+				target.OgeNumber, maxRetries, lastErr)
+			continue // ↪️ Переходим к следующей задаче
+		}
+		
 		out = append(out, task)
+	}
+	
+	// Если не сгенерировалось ни одной задачи — это реальная ошибка
+	if len(out) == 0 {
+		return StartResult{}, app.AIUnavailable(errors.New("diagnostic: failed to generate any tasks"))
 	}
 
 	sessionID, err := s.repo.CreateDiagnosticSession(ctx, userID)
@@ -100,7 +136,6 @@ func (s *Service) Start(ctx context.Context, userID int64) (StartResult, error) 
 
 	return StartResult{SessionID: sessionID, Tasks: out}, nil
 }
-
 func (s *Service) Submit(ctx context.Context, userID, sessionID int64, answers []AnswerInput) (SubmitResult, error) {
 	if err := s.repo.EnsureDiagnosticSessionOwner(ctx, userID, sessionID); err != nil {
 		return SubmitResult{}, err
