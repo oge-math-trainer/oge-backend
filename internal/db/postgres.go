@@ -191,14 +191,19 @@ func (s *Store) GetGeneratedTaskForUser(ctx context.Context, userID, id int64) (
 }
 
 func (s *Store) SaveAttempt(ctx context.Context, userID, taskID int64, mode, studentAnswer string, isCorrect bool, aiFeedback any) error {
-	feedback, err := json.Marshal(aiFeedback)
-	if err != nil {
-		return app.Internal(err)
+	var feedbackJSON json.RawMessage
+	if aiFeedback != nil {
+		b, err := json.Marshal(aiFeedback)
+		if err != nil {
+			return app.Internal(err)
+		}
+		feedbackJSON = json.RawMessage(b)
 	}
-	_, err = s.pool.Exec(ctx, `
+	
+	_, err := s.pool.Exec(ctx, `
 		INSERT INTO attempts (user_id, generated_task_id, mode, student_answer, is_correct, ai_feedback)
-		VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-	`, userID, taskID, mode, studentAnswer, isCorrect, string(feedback))
+		VALUES ($1, $2, $3, $4, $5, $6)  // ← Убрали ::jsonb, pgx сам обработает
+	`, userID, taskID, mode, studentAnswer, isCorrect, feedbackJSON)  // ← Передаём json.RawMessage
 	if err != nil {
 		return app.Internal(err)
 	}
@@ -292,14 +297,19 @@ func (s *Store) GetDiagnosticTargets(ctx context.Context) ([]tasks.Target, error
 }
 
 func (s *Store) SaveDiagnosticAnswer(ctx context.Context, sessionID int64, task tasks.Task, studentAnswer string, isCorrect bool, feedback any) error {
-	feedbackJSON, err := json.Marshal(feedback)
-	if err != nil {
-		return app.Internal(err)
+	var feedbackJSON json.RawMessage
+	if feedback != nil {
+		b, err := json.Marshal(feedback)
+		if err != nil {
+			return app.Internal(err)
+		}
+		feedbackJSON = json.RawMessage(b)
 	}
-	_, err = s.pool.Exec(ctx, `
+	
+	_, err := s.pool.Exec(ctx, `
 		INSERT INTO diagnostic_answers (session_id, generated_task_id, student_answer, is_correct, ai_feedback)
-		VALUES ($1, $2, $3, $4, $5::jsonb)
-	`, sessionID, task.ID, studentAnswer, isCorrect, string(feedbackJSON))
+		VALUES ($1, $2, $3, $4, $5)  // ← Убрали ::jsonb
+	`, sessionID, task.ID, studentAnswer, isCorrect, feedbackJSON)  // ← json.RawMessage
 	if err != nil {
 		return app.Internal(err)
 	}
