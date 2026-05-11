@@ -29,7 +29,7 @@ func NewClient(baseURL, apiKey, model string) *Client {
 		apiKey:  strings.TrimSpace(apiKey),
 		model:   strings.TrimSpace(model),
 		httpClient: &http.Client{
-			Timeout: 45 * time.Second,
+			Timeout: 60 * time.Second,
 		},
 	}
 }
@@ -118,7 +118,7 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 	body := chatRequest{
 		Model: c.model,
 		Messages: []chatMessage{
-			{Role: "system", Content: "Ты возвращаешь только валидный JSON без markdown и пояснений."},
+			{Role: "system", Content: "Ты возвращаешь ТОЛЬКО валидный JSON. Никакого markdown, никаких пояснений вне JSON. Начинай сразу с { и заканчивай }."},
 			{Role: "user", Content: prompt},
 		},
 		Temperature: 0.3,
@@ -165,13 +165,27 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 	}
 
 	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
-	content = strings.TrimPrefix(content, "```json")
-	content = strings.TrimPrefix(content, "```")
-	content = strings.TrimSuffix(content, "```")
-	content = strings.TrimSpace(content)
-	if err := json.Unmarshal([]byte(content), out); err != nil {
-		return app.AIUnavailable(err)
-	}
+
+// Чистим markdown блоки
+content = strings.TrimPrefix(content, "```json")
+content = strings.TrimPrefix(content, "```")
+content = strings.TrimSuffix(content, "```")
+content = strings.TrimSpace(content)
+
+// Если AI вернул текст с лишним, ищем JSON между { и }
+if !strings.HasPrefix(content, "{") {
+    start := strings.Index(content, "{")
+    end := strings.LastIndex(content, "}")
+    if start != -1 && end != -1 && end > start {
+        content = content[start : end+1]
+    }
+}
+
+if err := json.Unmarshal([]byte(content), out); err != nil {
+    // Логируем для отладки (раскомментируй если нужно)
+    // log.Printf("AI raw response failed to parse: %s", content)
+    return app.AIUnavailable(fmt.Errorf("invalid ai json: %w", err))
+}
 	return nil
 }
 
