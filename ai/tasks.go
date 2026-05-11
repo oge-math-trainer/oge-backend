@@ -63,7 +63,8 @@ Rules:
 - correct_answer must contain only digits (0-9), minus (-), comma (,). No spaces, no letters, no dots.
 - solution_steps minimum 3 steps, maximum 7
 - Problem must match real OGE difficulty for 9th grade
-- Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.`
+- Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.
+- Mathematical problems should not be based on pictures and should not require pictures to solve them`
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
