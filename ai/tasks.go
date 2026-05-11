@@ -14,12 +14,12 @@ import (
 func sanitizeAIResponse(raw string) string {
 	raw = strings.TrimSpace(raw)
 
-	// markdown fences
+	// remove markdown
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 
-	// extract json
+	// extract JSON object
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
 
@@ -27,12 +27,13 @@ func sanitizeAIResponse(raw string) string {
 		raw = raw[start : end+1]
 	}
 
-	// remove invalid latex escapes like \( \) \[ \]
+	// FIX INVALID ESCAPES
 	re := regexp.MustCompile(`\\+([\(\)\[\]])`)
 	raw = re.ReplaceAllString(raw, "$1")
 
-	// normalize common latex
-	raw = strings.ReplaceAll(raw, `\cdot`, "x")
+	// remove stray backslashes before normal chars
+	re2 := regexp.MustCompile(`\\([a-zA-Z])`)
+	raw = re2.ReplaceAllString(raw, "$1")
 
 	return strings.TrimSpace(raw)
 
@@ -150,8 +151,13 @@ Example wrong: "(x^2 + 2x - 3 = 0)"`
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
 	}
 
-	// cleanLatex вызывается ДО json.Unmarshal
+	fmt.Println("========== RAW BEFORE SANITIZE ==========")
+	fmt.Println(raw)
+
 	raw = sanitizeAIResponse(raw)
+
+	fmt.Println("========== RAW AFTER SANITIZE ==========")
+	fmt.Println(raw)
 
 	var result tasks.GeneratedContent
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
