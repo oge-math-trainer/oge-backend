@@ -101,7 +101,7 @@ func (c *Client) AnalyzeDiagnostic(ctx context.Context, answers []diagnostic.Ans
 	payload, _ := json.Marshal(answers)
 	prompt := fmt.Sprintf(`Проанализируй результаты диагностики ученика по ОГЭ 6-19.
 Ответы: %s
-Верни только JSON:
+Верни СТРОГО JSON без markdown и пояснений. Начинай сразу с { и заканчивай }:
 {"summary":"краткий анализ","weak_topics":["тема 1","тема 2"]}`, string(payload))
 	if err := c.completeJSON(ctx, prompt, &out); err != nil {
 		return diagnostic.Analysis{}, err
