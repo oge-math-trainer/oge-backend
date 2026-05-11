@@ -22,38 +22,48 @@ type Target struct {
 	SubtypeCode string
 }
 
-type Task struct {
-	ID              int64     `json:"id"`
-	UserID          int64     `json:"-"`
-	Mode            string    `json:"mode"`
-	TaskTypeID      *int64    `json:"-"`
-	OgeNumber       int       `json:"oge_number"`
-	SubtypeCode     string    `json:"subtype_code"`
-	Question        string    `json:"question"`
-	CorrectAnswer   string    `json:"-"`
-	SolutionSteps   []string  `json:"-"`
-	SelfCheck       string    `json:"-"`
-	IsValid         bool      `json:"-"`
-	ValidationNotes string    `json:"-"`
-	Source          string    `json:"source"`
-	CreatedAt       time.Time `json:"created_at,omitempty"`
-	Graphs          []Graph   `json:"graphs,omitempty"`
+// GraphInfo - информация об одном графике от ИИ (для задания №11)
+type GraphInfo struct {
+	ID           string    `json:"id"`
+	Type         string    `json:"type"`
+	Coefficients []float64 `json:"coefficients"`
+	XMin         int       `json:"x_min"`
+	XMax         int       `json:"x_max"`
+	YMin         int       `json:"y_min"`
+	YMax         int       `json:"y_max"`
 }
 
-type Graph struct {
-	ID      string `json:"id"`
-	Formula string `json:"formula"`
-	Type    string `json:"type"`
+// GraphTaskParams - контейнер для графиков задачи
+type GraphTaskParams struct {
+	Graphs []GraphInfo `json:"graphs,omitempty"`
+}
+
+type Task struct {
+	ID              int64            `json:"id"`
+	UserID          int64            `json:"-"`
+	Mode            string           `json:"mode"`
+	TaskTypeID      *int64           `json:"-"`
+	OgeNumber       int              `json:"oge_number"`
+	SubtypeCode     string           `json:"subtype_code"`
+	Question        string           `json:"question"`
+	CorrectAnswer   string           `json:"-"`
+	SolutionSteps   []string         `json:"-"`
+	SelfCheck       string           `json:"-"`
+	IsValid         bool             `json:"-"`
+	ValidationNotes string           `json:"-"`
+	Source          string           `json:"source"`
+	CreatedAt       time.Time        `json:"created_at,omitempty"`
+	GraphData       *GraphTaskParams `json:"graphs,omitempty"` // ← Фронтенд ждёт "graphs"
 }
 
 type GeneratedContent struct {
-	Question        string   `json:"question"`
-	CorrectAnswer   string   `json:"correct_answer"`
-	SolutionSteps   []string `json:"solution_steps"`
-	SelfCheck       string   `json:"self_check"`
-	IsValid         bool     `json:"is_valid"`
-	ValidationNotes string   `json:"validation_notes"`
-	Graphs          []Graph  `json:"graphs,omitempty"` // только для задания №11
+	Question        string      `json:"question"`
+	CorrectAnswer   string      `json:"correct_answer"`
+	SolutionSteps   []string    `json:"solution_steps"`
+	SelfCheck       string      `json:"self_check"`
+	IsValid         bool        `json:"is_valid"`
+	ValidationNotes string      `json:"validation_notes"`
+	Graphs          []GraphInfo `json:"graphs,omitempty"`
 }
 
 type CreateTask struct {
@@ -69,6 +79,7 @@ type CreateTask struct {
 	IsValid         bool
 	ValidationNotes string
 	Source          string
+	GraphData       *GraphTaskParams `json:"graph_data,omitempty"`
 }
 
 type FallbackTask struct {
@@ -83,9 +94,6 @@ type FallbackTask struct {
 type GenerateRequest struct {
 	UserID int64
 	Mode   string
-	// StoredMode overrides Mode only for internal flows. Diagnostic generation
-	// uses ModeCustom to target exact OGE numbers, but stores mode=diagnostic
-	// so later check/hint/explain and attempts know the real learning flow.
 	StoredMode  string
 	OgeNumber   *int
 	SubtypeCode string
@@ -146,7 +154,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 	}
 
 	if s.ai == nil || !s.ai.IsConfigured() {
-		return Task{}, app.AIUnavailable(errors.New("OPENROUTER_API_KEY is empty"))
+		return Task{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
 
 	content, err := s.ai.GenerateTask(ctx, target)
@@ -156,6 +164,15 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 	if !content.IsValid {
 		return Task{}, app.AIUnavailable(errors.New("ai returned invalid task"))
 	}
+
+	// Упаковываем графики от ИИ
+	var graphData *GraphTaskParams
+	if len(content.Graphs) > 0 {
+		graphData = &GraphTaskParams{
+			Graphs: content.Graphs,
+		}
+	}
+
 	return s.repo.CreateGeneratedTask(ctx, CreateTask{
 		UserID:          req.UserID,
 		Mode:            storedMode(req),
@@ -169,6 +186,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		IsValid:         content.IsValid,
 		ValidationNotes: strings.TrimSpace(content.ValidationNotes),
 		Source:          "qwen",
+		GraphData:       graphData,
 	})
 }
 
@@ -178,21 +196,9 @@ func (s *Service) Check(ctx context.Context, req CheckRequest) (CheckResult, err
 		return CheckResult{}, err
 	}
 	if s.ai == nil || !s.ai.IsConfigured() {
-		return CheckResult{}, app.AIUnavailable(errors.New("OPENROUTER_API_KEY is empty"))
+		return CheckResult{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
-
-	result, err := s.ai.CheckAnswer(ctx, task, req.StudentAnswer)
-	if err != nil {
-		return CheckResult{}, err
-	}
-
-	if err := s.repo.SaveAttempt(ctx, req.UserID, task.ID, task.Mode, req.StudentAnswer, result.IsCorrect, result); err != nil {
-		return CheckResult{}, err
-	}
-	if err := s.repo.UpdateProgress(ctx, req.UserID, task, result.IsCorrect); err != nil {
-		return CheckResult{}, err
-	}
-	return result, nil
+	return s.ai.CheckAnswer(ctx, task, req.StudentAnswer)
 }
 
 func (s *Service) Hint(ctx context.Context, userID, taskID int64) (HintResult, error) {
@@ -201,7 +207,7 @@ func (s *Service) Hint(ctx context.Context, userID, taskID int64) (HintResult, e
 		return HintResult{}, err
 	}
 	if s.ai == nil || !s.ai.IsConfigured() {
-		return HintResult{}, app.AIUnavailable(errors.New("OPENROUTER_API_KEY is empty"))
+		return HintResult{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
 	return s.ai.Hint(ctx, task)
 }
@@ -212,7 +218,7 @@ func (s *Service) Explain(ctx context.Context, userID, taskID int64) (ExplainRes
 		return ExplainResult{}, err
 	}
 	if s.ai == nil || !s.ai.IsConfigured() {
-		return ExplainResult{}, app.AIUnavailable(errors.New("OPENROUTER_API_KEY is empty"))
+		return ExplainResult{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
 	return s.ai.Explain(ctx, task)
 }
