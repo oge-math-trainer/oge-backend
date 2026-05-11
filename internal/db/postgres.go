@@ -169,7 +169,7 @@ func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) 
 			validation_notes,
 			generation_source
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING id, user_id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 		          COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''),
 		          is_valid, COALESCE(validation_notes, ''), generation_source, created_at
@@ -202,8 +202,8 @@ func (s *Store) SaveAttempt(ctx context.Context, userID, taskID int64, mode, stu
 	
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO attempts (user_id, generated_task_id, mode, student_answer, is_correct, ai_feedback)
-		VALUES ($1, $2, $3, $4, $5, $6)  // ← Убрали ::jsonb, pgx сам обработает
-	`, userID, taskID, mode, studentAnswer, isCorrect, feedbackJSON)  // ← Передаём json.RawMessage
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, userID, taskID, mode, studentAnswer, isCorrect, feedbackJSON)
 	if err != nil {
 		return app.Internal(err)
 	}
@@ -308,8 +308,8 @@ func (s *Store) SaveDiagnosticAnswer(ctx context.Context, sessionID int64, task 
 	
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO diagnostic_answers (session_id, generated_task_id, student_answer, is_correct, ai_feedback)
-		VALUES ($1, $2, $3, $4, $5)  // ← Убрали ::jsonb
-	`, sessionID, task.ID, studentAnswer, isCorrect, feedbackJSON)  // ← json.RawMessage
+		VALUES ($1, $2, $3, $4, $5)
+	`, sessionID, task.ID, studentAnswer, isCorrect, feedbackJSON)
 	if err != nil {
 		return app.Internal(err)
 	}
@@ -325,14 +325,15 @@ func (s *Store) FinishDiagnosticSession(ctx context.Context, sessionID int64, an
 	if err != nil {
 		return app.Internal(err)
 	}
+	
 	_, err = s.pool.Exec(ctx, `
 		UPDATE diagnostic_sessions
 		SET status = 'finished',
-		    ai_analysis = $2::jsonb,
-		    weak_topics = $3::jsonb,
+		    ai_analysis = $2,
+		    weak_topics = $3,
 		    finished_at = now()
 		WHERE id = $1
-	`, sessionID, string(analysisJSON), string(weakTopicsJSON))
+	`, sessionID, json.RawMessage(analysisJSON), json.RawMessage(weakTopicsJSON))
 	if err != nil {
 		return app.Internal(err)
 	}
