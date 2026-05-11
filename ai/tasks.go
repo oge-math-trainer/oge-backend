@@ -11,18 +11,38 @@ import (
 )
 
 // cleanLatex убирает LaTeX-разметку которую добавляют некоторые модели
-func cleanLatex(s string) string {
-	s = strings.ReplaceAll(s, `\(`, "")
-	s = strings.ReplaceAll(s, `\)`, "")
-	s = strings.ReplaceAll(s, `\[`, "")
-	s = strings.ReplaceAll(s, `\]`, "")
-	s = strings.ReplaceAll(s, `\cdot`, "x")
-	s = strings.ReplaceAll(s, "→", "=>")
-	s = strings.ReplaceAll(s, "≠", "!=")
-	s = strings.ReplaceAll(s, "≤", "<=")
-	s = strings.ReplaceAll(s, "≥", ">=")
-	s = strings.ReplaceAll(s, "±", "+/-")
-	return s
+func sanitizeAIResponse(raw string) string {
+	raw = strings.TrimSpace(raw)
+
+	// убрать markdown fences
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+
+	// вытащить JSON объект
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+
+	if start >= 0 && end >= 0 && end > start {
+		raw = raw[start : end+1]
+	}
+
+	// исправить невалидные escape sequence
+	replacer := strings.NewReplacer(
+		`\(`, `(`,
+		`\)`, `)`,
+		`\[`, `[`,
+		`\]`, `]`,
+		`\cdot`, `x`,
+		`\*`, `*`,
+		`\_`, `_`,
+		`\$`, `$`,
+	)
+
+	raw = replacer.Replace(raw)
+
+	return strings.TrimSpace(raw)
+
 }
 
 // validAnswerRe проверяет что ответ содержит только цифры, запятую и минус
@@ -66,6 +86,13 @@ Rules:
 - Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.
 - Mathematical problems should not be based on pictures and should not require pictures to solve them.
 - SPECIAL RULE FOR oge_number 11:
+
+For oge_number 11:
+correct_answer may contain graph matching notation like:
+"1-A,2-B"
+or inequalities like:
+"a>0,b<0"
+
   if oge_number is 11, you MUST add a "graphs" field to the JSON.
 
 "graphs" is an array of 1 to 4 objects depending on the task type.
@@ -101,7 +128,16 @@ Rules:
 
 If the task requires matching graphs to formulas, "correct_answer" must be like "1-A,2-B,3-C".
 
-For all other oge_number values, do NOT include the "graphs" field.`
+For all other oge_number values, do NOT include the "graphs" field.
+
+IMPORTANT JSON RULES:
+
+NEVER use LaTeX delimiters: \( \), \[ \], $$ $$
+NEVER use backslashes in mathematical expressions
+NEVER escape parentheses
+Use only plain UTF-8 text
+Example correct: "x^2 + 2x - 3 = 0"
+Example wrong: "(x^2 + 2x - 3 = 0)"`
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
@@ -122,7 +158,7 @@ For all other oge_number values, do NOT include the "graphs" field.`
 	}
 
 	// cleanLatex вызывается ДО json.Unmarshal
-	raw = cleanLatex(raw)
+	raw = sanitizeAIResponse(raw)
 
 	var result tasks.GeneratedContent
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
@@ -175,7 +211,7 @@ Rules:
 	}
 
 	// cleanLatex вызывается ДО json.Unmarshal
-	raw = cleanLatex(raw)
+	raw = sanitizeAIResponse(raw)
 
 	var result tasks.CheckResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
@@ -218,7 +254,7 @@ Rules:
 	}
 
 	// cleanLatex вызывается ДО json.Unmarshal
-	raw = cleanLatex(raw)
+	raw = sanitizeAIResponse(raw)
 
 	var parsed struct {
 		Hint string `json:"hint"`
@@ -265,7 +301,7 @@ Rules:
 	}
 
 	// cleanLatex вызывается ДО json.Unmarshal
-	raw = cleanLatex(raw)
+	raw = sanitizeAIResponse(raw)
 
 	var result tasks.ExplainResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
