@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
@@ -53,6 +55,30 @@ func validateAnswer(answer string) error {
 	return nil
 }
 
+type catalogEntry struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Example     string `json:"example"`
+}
+
+func loadCatalogEntry(ogeNumber int, subtypeCode string) catalogEntry {
+	data, err := os.ReadFile("task_catalog.json")
+	if err != nil {
+		return catalogEntry{}
+	}
+	var catalog map[string]map[string]catalogEntry
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		return catalogEntry{}
+	}
+	key := strconv.Itoa(ogeNumber)
+	if subtypes, ok := catalog[key]; ok {
+		if entry, ok := subtypes[subtypeCode]; ok {
+			return entry
+		}
+	}
+	return catalogEntry{}
+}
+
 // IsConfigured проверяет что клиент настроен (ключ задан)
 func (c *Client) IsConfigured() bool {
 	return c.apiKey != ""
@@ -77,11 +103,10 @@ Rules:
 - correct_answer must contain only digits (0-9), minus (-), comma (,). No spaces, no letters, no dots.
 - solution_steps minimum 3 steps, maximum 7
 - Problem must match real OGE difficulty for 9th grade
-- Do NOT use LaTeX, arrows (->), or any special math symbols. Use plain text only.
-- DO NOT use any special characters, ONLY ASCII.
+- ONLY ASCII.
 - DO NOT use any greek letters.
-- DO NOT use " or '.
-- DO NOT use line breaks.
+- DO NOT use markdown
+- RETURN VALID JSON ONLY
 - Mathematical problems should not be based on pictures and should not require pictures to solve them.
 - SPECIAL RULE FOR oge_number 11:
 
@@ -140,10 +165,17 @@ Example wrong: "(x^2 + 2x - 3 = 0)"`
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
 		SubtypeCode string `json:"subtype_code"`
+		Title       string `json:"task_title"`
+		Description string `json:"task_description"`
+		Example     string `json:"example"`
 	}
+	entry := loadCatalogEntry(target.OgeNumber, target.SubtypeCode)
 	inputBytes, err := json.Marshal(generateInput{
 		OgeNumber:   target.OgeNumber,
 		SubtypeCode: target.SubtypeCode,
+		Title:       entry.Title,
+		Description: entry.Description,
+		Example:     entry.Example,
 	})
 	if err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
