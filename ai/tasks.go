@@ -56,9 +56,11 @@ func validateAnswer(answer string) error {
 }
 
 type catalogEntry struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Example     string `json:"example"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description"`
+	Example          string   `json:"example"`
+	ForbiddenTopics  []string `json:"forbidden_topics"`
+	RequiredKeywords []string `json:"required_keywords"`
 }
 
 func loadCatalogEntry(ogeNumber int, subtypeCode string) catalogEntry {
@@ -84,6 +86,42 @@ func (c *Client) IsConfigured() bool {
 	return c.apiKey != ""
 }
 
+func buildSubtypePrompt(entry catalogEntry) string {
+	if entry.Title == "" {
+		return ""
+	}
+
+	prompt := fmt.Sprintf(`
+
+TASK SUBTYPE REQUIREMENTS:
+Title: %s
+Description: %s
+Example of VALID task: %s
+
+STRICT RULES:
+- The generated task MUST correspond exactly to this subtype.
+- Do NOT generate tasks from other mathematical topics.
+- Do NOT generate physics or motion problems unless explicitly required.
+- The generated problem must resemble real OGE tasks.
+`, entry.Title, entry.Description, entry.Example)
+
+	if len(entry.ForbiddenTopics) > 0 {
+		prompt += "\nFORBIDDEN TOPICS (never use these):\n"
+		for _, t := range entry.ForbiddenTopics {
+			prompt += "- " + t + "\n"
+		}
+	}
+
+	if len(entry.RequiredKeywords) > 0 {
+		prompt += "\nREQUIRED: task must involve:\n"
+		for _, k := range entry.RequiredKeywords {
+			prompt += "- " + k + "\n"
+		}
+	}
+
+	return prompt
+}
+
 // GenerateTask генерирует задание ОГЭ по математике
 func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
 	systemPrompt := `You are an expert mathematics teacher specializing in Russian OGE exam preparation.
@@ -103,7 +141,6 @@ Rules:
 - correct_answer must contain only digits (0-9), minus (-), comma (,). No spaces, no letters, no dots.
 - solution_steps minimum 3 steps, maximum 7
 - Problem must match real OGE difficulty for 9th grade
-- ONLY ASCII.
 - DO NOT use any greek letters.
 - DO NOT use markdown
 - RETURN VALID JSON ONLY
@@ -162,26 +199,22 @@ Use only plain UTF-8 text
 Example correct: "x^2 + 2x - 3 = 0"
 Example wrong: "(x^2 + 2x - 3 = 0)"`
 
+	entry := loadCatalogEntry(target.OgeNumber, target.SubtypeCode)
+	systemPrompt += buildSubtypePrompt(entry)
+
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
 		SubtypeCode string `json:"subtype_code"`
-		Title       string `json:"task_title"`
-		Description string `json:"task_description"`
-		Example     string `json:"example"`
 	}
-	entry := loadCatalogEntry(target.OgeNumber, target.SubtypeCode)
 	inputBytes, err := json.Marshal(generateInput{
 		OgeNumber:   target.OgeNumber,
 		SubtypeCode: target.SubtypeCode,
-		Title:       entry.Title,
-		Description: entry.Description,
-		Example:     entry.Example,
 	})
 	if err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
 	}
 
-	raw, err := c.Chat(systemPrompt, string(inputBytes), 800, 0.7)
+	raw, err := c.Chat(systemPrompt, string(inputBytes), 800, 0.5)
 	fmt.Println("RAW:", raw)
 	if err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
