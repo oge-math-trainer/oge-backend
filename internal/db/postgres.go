@@ -199,7 +199,7 @@ func (s *Store) SaveAttempt(ctx context.Context, userID, taskID int64, mode, stu
 		}
 		feedbackJSON = json.RawMessage(b)
 	}
-	
+
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO attempts (user_id, generated_task_id, mode, student_answer, is_correct, ai_feedback)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -305,10 +305,10 @@ func (s *Store) SaveDiagnosticAnswer(ctx context.Context, sessionID int64, task 
 		}
 		feedbackJSON = json.RawMessage(b)
 	}
-	
+
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO diagnostic_answers (session_id, generated_task_id, student_answer, is_correct, ai_feedback)
-		VALUES ($1, $2, $3, $4, $5)
+		VALUES ($1, $2, $3, $4, $5::jsonb)
 	`, sessionID, task.ID, studentAnswer, isCorrect, feedbackJSON)
 	if err != nil {
 		return app.Internal(err)
@@ -325,7 +325,7 @@ func (s *Store) FinishDiagnosticSession(ctx context.Context, sessionID int64, an
 	if err != nil {
 		return app.Internal(err)
 	}
-	
+
 	_, err = s.pool.Exec(ctx, `
 		UPDATE diagnostic_sessions
 		SET status = 'finished',
