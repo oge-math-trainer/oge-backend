@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"  // ← ДОБАВЛЕНО: нужен для отладочного вывода
 	"log"
 	"net/http"
 	"os/signal"
@@ -38,6 +39,15 @@ func main() {
 	defer store.Close()
 
 	aiClient := ai.NewClient(cfg.AITunnelBaseURL, cfg.AITunnelAPIKey, cfg.AITunnelModel)
+
+	// 🔍 ОТЛАДКА: что видит сервер?
+	fmt.Println("🔍 DEBUG: AITunnelAPIKey length:", len(cfg.AITunnelAPIKey))
+	if aiClient.IsConfigured() {
+		fmt.Println("✅ AI CLIENT: Configured (key is present)")
+	} else {
+		fmt.Println("❌ AI CLIENT: NOT configured (key is missing or empty)")
+	}
+
 	authService := auth.NewService(store, cfg.AuthSecret, cfg.TokenTTL)
 	taskService := tasks.NewService(store, aiClient)
 	diagnosticService := diagnostic.NewService(store, taskService, aiClient)

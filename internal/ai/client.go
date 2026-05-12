@@ -40,7 +40,7 @@ func (c *Client) IsConfigured() bool {
 
 func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
 	var out tasks.GeneratedContent
-	
+
 	// 🔧 Расширенный промпт с поддержкой графиков для №11
 	graphsRule := ""
 	if target.OgeNumber == 11 {
@@ -52,7 +52,7 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
    - hyperbola: y=k/x → coefficients=[k]
    - Все коэффициенты — только числа, без формул и LaTeX.`
 	}
-	
+
 	prompt := fmt.Sprintf(`Ты — составитель заданий ОГЭ по математике (6-19).
 Параметры: oge_number=%d, subtype_code=%s.
 Требования:
@@ -63,10 +63,25 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 5. Верни ТОЛЬКО валидный JSON без markdown, без пояснений, начинай с { и заканчивай }:
 {"question":"текст","correct_answer":"число","solution_steps":["шаг 1"],"self_check":"проверка","is_valid":true,"validation_notes":"соответствует ОГЭ"}%s`,
 		target.OgeNumber, target.SubtypeCode, graphsRule)
-		
+
 	if err := c.completeJSON(ctx, prompt, &out); err != nil {
 		return tasks.GeneratedContent{}, err
 	}
+
+	// 🔧 Очищаем текст от знаков доллара (LaTeX) перед сохранением/возвратом
+	// 🔍 Логируем для отладки
+	if strings.Contains(out.Question, "$") {
+		fmt.Printf("🧹 CLEANING question: %q → %q\n", out.Question, cleanLaTeX(out.Question))
+	}
+	out.Question = cleanLaTeX(out.Question)
+
+	for i, step := range out.SolutionSteps {
+		if strings.Contains(step, "$") {
+			fmt.Printf("🧹 CLEANING step[%d]: %q → %q\n", i, step, cleanLaTeX(step))
+		}
+		out.SolutionSteps[i] = cleanLaTeX(step)
+	}
+
 	return out, nil
 }
 
@@ -145,7 +160,7 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 	if err != nil {
 		return app.Internal(err)
 	}
-	
+
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -188,16 +203,16 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		}
 	}
 
-	// 🔍 Логируем сырой ответ перед парсингом (Point 1 от Ангелины)
+	// 🔍 Логируем сырой ответ перед парсингом
 	fmt.Println("🔍 AI RAW RESPONSE:", content)
 
 	if err := json.Unmarshal([]byte(content), out); err != nil {
-		// 🔍 Логируем конкретную ошибку парсинга (Point 2)
+		// 🔍 Логируем конкретную ошибку парсинга
 		fmt.Printf("❌ JSON PARSE FAILED: %v\n", err)
-		fmt.Printf("❌ Raw content was: %.200s...\n", content) // первые 200 символов
+		fmt.Printf("❌ Raw content was: %.200s...\n", content)
 		return app.AIUnavailable(fmt.Errorf("invalid ai json: %w", err))
 	}
-	
+
 	// 🔍 Дополнительная валидация после парсинга
 	if gen, ok := out.(*tasks.GeneratedContent); ok {
 		if strings.TrimSpace(gen.Question) == "" {
@@ -213,7 +228,7 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 			return app.Validation("AI returned too few solution steps")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -232,4 +247,11 @@ type chatResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
 	} `json:"choices"`
+}
+
+// cleanLaTeX удаляет ВСЕ знаки доллара из текста
+// Это предотвращает ошибку "ambiguous parameter type" в PostgreSQL
+// Пример: "$x^2 + b_1 = 0$" → "x^2 + b_1 = 0"
+func cleanLaTeX(text string) string {
+	return strings.ReplaceAll(text, "$", "")
 }
