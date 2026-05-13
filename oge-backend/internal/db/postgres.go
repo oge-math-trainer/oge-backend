@@ -1,0 +1,566 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
+	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
+	"github.com/oge-math-trainer/oge-backend.git/internal/progress"
+	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
+)
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+func New(ctx context.Context, databaseURL string) (*Store, error) {
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &Store{pool: pool}, nil
+}
+
+func (s *Store) Close() {
+	if s != nil && s.pool != nil {
+		s.pool.Close()
+	}
+}
+
+func (s *Store) Ping(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	if s == nil || s.pool == nil {
+		return app.DBUnavailable(errors.New("postgres pool is nil"))
+	}
+	if err := s.pool.Ping(ctx); err != nil {
+		return app.DBUnavailable(err)
+	}
+	return nil
+}
+
+func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (auth.User, error) {
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash)
+		VALUES ($1, $2)
+		RETURNING id, email, created_at
+	`, email, passwordHash)
+
+	var user auth.User
+	if err := row.Scan(&user.ID, &user.Email, &user.CreatedAt); err != nil {
+		if isUniqueViolation(err) {
+			return auth.User{}, app.Conflict("Пользователь с таким email уже существует")
+		}
+		return auth.User{}, app.Internal(err)
+	}
+	return user, nil
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (auth.UserWithPassword, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, email, password_hash, created_at
+		FROM users
+		WHERE lower(email) = lower($1)
+	`, email)
+
+	var user auth.UserWithPassword
+	if err := row.Scan(&user.ID, &user.Email, &user.PasswordHash, &user.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return auth.UserWithPassword{}, app.NotFound("Пользователь не найден")
+		}
+		return auth.UserWithPassword{}, app.Internal(err)
+	}
+	return user, nil
+}
+
+func (s *Store) GetUserByID(ctx context.Context, id int64) (auth.User, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, email, created_at
+		FROM users
+		WHERE id = $1
+	`, id)
+
+	var user auth.User
+	if err := row.Scan(&user.ID, &user.Email, &user.CreatedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return auth.User{}, app.NotFound("Пользователь не найден")
+		}
+		return auth.User{}, app.Internal(err)
+	}
+	return user, nil
+}
+
+func (s *Store) GetWeakTarget(ctx context.Context, userID int64) (tasks.Target, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(p.task_type_id, tt.id), p.oge_number, p.subtype_code
+		FROM progress p
+		LEFT JOIN task_types tt
+			ON tt.oge_number = p.oge_number
+			AND tt.subtype_code = p.subtype_code
+		WHERE p.user_id = $1
+		ORDER BY p.mastery_score ASC, p.attempts_count DESC, p.updated_at ASC
+		LIMIT 1
+	`, userID)
+	return scanTarget(row, "Нет данных прогресса для режима weak")
+}
+
+func (s *Store) GetRandomTaskType(ctx context.Context) (tasks.Target, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, oge_number, subtype_code
+		FROM task_types
+		WHERE oge_number BETWEEN 6 AND 19
+		ORDER BY random()
+		LIMIT 1
+	`)
+	return scanTarget(row, "Не найден тип задания для режима all")
+}
+
+func (s *Store) ResolveTarget(ctx context.Context, target tasks.Target) (tasks.Target, error) {
+	if target.TaskTypeID != nil {
+		return target, nil
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, oge_number, subtype_code
+		FROM task_types
+		WHERE oge_number = $1 AND subtype_code = $2
+		LIMIT 1
+	`, target.OgeNumber, target.SubtypeCode)
+
+	resolved, err := scanTarget(row, "")
+	if err != nil {
+		var appErr *app.Error
+		if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
+			return target, nil
+		}
+		return tasks.Target{}, err
+	}
+	return resolved, nil
+}
+
+func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) (tasks.Task, error) {
+	steps, err := json.Marshal(task.SolutionSteps)
+	if err != nil {
+		return tasks.Task{}, app.Internal(err)
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO generated_tasks (
+			user_id,
+			mode,
+			task_type_id,
+			oge_number,
+			subtype_code,
+			question,
+			correct_answer,
+			solution_steps,
+			self_check,
+			is_valid,
+			validation_notes,
+			generation_source
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		RETURNING id, user_id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
+		          COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''),
+		          is_valid, COALESCE(validation_notes, ''), generation_source, created_at
+	`, task.UserID, task.Mode, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, task.Question, task.CorrectAnswer,
+		string(steps), task.SelfCheck, task.IsValid, task.ValidationNotes, task.Source)
+
+	return scanGeneratedTask(row)
+}
+
+func (s *Store) GetGeneratedTaskForUser(ctx context.Context, userID, id int64) (tasks.Task, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id, user_id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
+		       COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''),
+		       is_valid, COALESCE(validation_notes, ''), generation_source, created_at
+		FROM generated_tasks
+		WHERE id = $1 AND user_id = $2
+	`, id, userID)
+	return scanGeneratedTask(row)
+}
+
+func (s *Store) SaveAttempt(ctx context.Context, userID, taskID int64, mode, studentAnswer string, isCorrect bool, aiFeedback any) error {
+	var feedbackJSON json.RawMessage
+	if aiFeedback != nil {
+		b, err := json.Marshal(aiFeedback)
+		if err != nil {
+			return app.Internal(err)
+		}
+		feedbackJSON = json.RawMessage(b)
+	}
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO attempts (user_id, generated_task_id, mode, student_answer, is_correct, ai_feedback)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, userID, taskID, mode, studentAnswer, isCorrect, feedbackJSON)
+	if err != nil {
+		return app.Internal(err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateProgress(ctx context.Context, userID int64, task tasks.Task, isCorrect bool) error {
+	correctDelta := 0
+	if isCorrect {
+		correctDelta = 1
+	}
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO progress (
+			user_id,
+			task_type_id,
+			oge_number,
+			subtype_code,
+			attempts_count,
+			correct_count,
+			mastery_score
+		)
+		VALUES ($1, $2, $3, $4, 1, $5::int, $5::int::numeric)
+		ON CONFLICT (user_id, oge_number, subtype_code)
+		DO UPDATE SET
+			task_type_id = COALESCE(EXCLUDED.task_type_id, progress.task_type_id),
+			attempts_count = progress.attempts_count + 1,
+			correct_count = progress.correct_count + $5::int,
+			mastery_score = ((progress.correct_count + $5::int)::numeric / (progress.attempts_count + 1)::numeric),
+			updated_at = now()
+	`, userID, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, correctDelta)
+	if err != nil {
+		return app.Internal(err)
+	}
+	return nil
+}
+
+func (s *Store) CreateDiagnosticSession(ctx context.Context, userID int64) (int64, error) {
+	var id int64
+	if err := s.pool.QueryRow(ctx, `
+		INSERT INTO diagnostic_sessions (user_id, status)
+		VALUES ($1, 'started')
+		RETURNING id
+	`, userID).Scan(&id); err != nil {
+		return 0, app.Internal(err)
+	}
+	return id, nil
+}
+
+func (s *Store) EnsureDiagnosticSessionOwner(ctx context.Context, userID, sessionID int64) error {
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM diagnostic_sessions
+			WHERE id = $1 AND user_id = $2
+		)
+	`, sessionID, userID).Scan(&exists); err != nil {
+		return app.Internal(err)
+	}
+	if !exists {
+		return app.NotFound("Диагностическая сессия не найдена")
+	}
+	return nil
+}
+
+func (s *Store) GetDiagnosticTargets(ctx context.Context) ([]tasks.Target, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, oge_number, subtype_code
+		FROM (
+			SELECT DISTINCT ON (oge_number) id, oge_number, subtype_code
+			FROM task_types
+			WHERE oge_number BETWEEN 6 AND 19
+			ORDER BY oge_number, random()
+		) selected
+		ORDER BY oge_number
+	`)
+	if err != nil {
+		return nil, app.Internal(err)
+	}
+	defer rows.Close()
+
+	targets, err := collectTargets(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) > 0 {
+		return targets, nil
+	}
+
+	return targets, nil
+}
+
+func (s *Store) SaveDiagnosticAnswer(ctx context.Context, sessionID int64, task tasks.Task, studentAnswer string, isCorrect bool, feedback any) error {
+	var feedbackJSON json.RawMessage
+	if feedback != nil {
+		b, err := json.Marshal(feedback)
+		if err != nil {
+			return app.Internal(err)
+		}
+		feedbackJSON = json.RawMessage(b)
+	}
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO diagnostic_answers (session_id, generated_task_id, student_answer, is_correct, ai_feedback)
+		VALUES ($1, $2, $3, $4, $5)
+	`, sessionID, task.ID, studentAnswer, isCorrect, feedbackJSON)
+	if err != nil {
+		return app.Internal(err)
+	}
+	return nil
+}
+
+func (s *Store) FinishDiagnosticSession(ctx context.Context, sessionID int64, analysis diagnostic.Analysis, weakTopics []string) error {
+	analysisJSON, err := json.Marshal(analysis)
+	if err != nil {
+		return app.Internal(err)
+	}
+	weakTopicsJSON, err := json.Marshal(weakTopics)
+	if err != nil {
+		return app.Internal(err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		UPDATE diagnostic_sessions
+		SET status = 'finished',
+		    ai_analysis = $2,
+		    weak_topics = $3,
+		    finished_at = now()
+		WHERE id = $1
+	`, sessionID, json.RawMessage(analysisJSON), json.RawMessage(weakTopicsJSON))
+	if err != nil {
+		return app.Internal(err)
+	}
+	return nil
+}
+
+func (s *Store) AttachTaskToSession(ctx context.Context, sessionID, taskID int64) error {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO diagnostic_session_tasks (session_id, generated_task_id)
+		SELECT $1, $2
+		WHERE EXISTS (
+			SELECT 1
+			FROM diagnostic_sessions
+			WHERE id = $1 AND status = 'started'
+		)
+		ON CONFLICT (session_id, generated_task_id) DO NOTHING
+	`, sessionID, taskID)
+	if err != nil {
+		return app.Internal(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return app.NotFound("Диагностическая сессия завершена")
+	}
+	return nil
+}
+
+func (s *Store) GetTasksBySession(ctx context.Context, sessionID int64) ([]tasks.Task, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT gt.id, gt.user_id, gt.mode, gt.task_type_id, gt.oge_number, gt.subtype_code, 
+		       gt.question, gt.correct_answer, COALESCE(gt.solution_steps, '[]'::jsonb), 
+		       COALESCE(gt.self_check, ''), gt.is_valid, COALESCE(gt.validation_notes, ''), 
+		       gt.generation_source, gt.created_at
+		FROM diagnostic_session_tasks dst
+		JOIN generated_tasks gt ON dst.generated_task_id = gt.id
+		WHERE dst.session_id = $1
+		  AND gt.mode = 'diagnostic'
+		ORDER BY gt.oge_number, dst.created_at
+	`, sessionID)
+	if err != nil {
+		return nil, app.Internal(err)
+	}
+	defer rows.Close()
+
+	out := make([]tasks.Task, 0)
+	for rows.Next() {
+		task, err := scanGeneratedTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, app.Internal(err)
+	}
+	return out, nil
+}
+
+func (s *Store) GetTaskBySession(ctx context.Context, sessionID, taskID int64) (tasks.Task, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT gt.id, gt.user_id, gt.mode, gt.task_type_id, gt.oge_number, gt.subtype_code, 
+		       gt.question, gt.correct_answer, COALESCE(gt.solution_steps, '[]'::jsonb), 
+		       COALESCE(gt.self_check, ''), gt.is_valid, COALESCE(gt.validation_notes, ''), 
+		       gt.generation_source, gt.created_at
+		FROM diagnostic_session_tasks dst
+		JOIN generated_tasks gt ON dst.generated_task_id = gt.id
+		WHERE dst.session_id = $1
+		  AND gt.id = $2
+		  AND gt.mode = 'diagnostic'
+	`, sessionID, taskID)
+	return scanGeneratedTask(row)
+}
+
+func (s *Store) GetProgress(ctx context.Context, userID int64) ([]progress.Item, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			p.oge_number,
+			p.subtype_code,
+			COALESCE(t.title, ''),
+			COALESCE(st.title, ''),
+			COALESCE(tt.title, ''),
+			p.attempts_count,
+			p.correct_count,
+			p.mastery_score::float8
+		FROM progress p
+		LEFT JOIN task_types tt ON tt.id = p.task_type_id
+		LEFT JOIN topics t ON t.id = tt.topic_id
+		LEFT JOIN subtopics st ON st.id = tt.subtopic_id
+		WHERE p.user_id = $1
+		ORDER BY p.mastery_score ASC, p.oge_number ASC, p.subtype_code ASC
+	`, userID)
+	if err != nil {
+		return nil, app.Internal(err)
+	}
+	defer rows.Close()
+
+	items := make([]progress.Item, 0)
+	for rows.Next() {
+		var item progress.Item
+		if err := rows.Scan(&item.OgeNumber, &item.SubtypeCode, &item.TopicTitle, &item.SubtopicTitle, &item.TaskTitle, &item.AttemptsCount, &item.CorrectCount, &item.MasteryScore); err != nil {
+			return nil, app.Internal(err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, app.Internal(err)
+	}
+	return items, nil
+}
+
+func (s *Store) GetProgressStats(ctx context.Context, userID int64) (progress.Stats, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(attempts_count), 0)::int,
+			COALESCE(SUM(correct_count), 0)::int,
+			COALESCE(AVG(mastery_score), 0)::float8
+		FROM progress
+		WHERE user_id = $1
+	`, userID)
+
+	var stats progress.Stats
+	if err := row.Scan(&stats.TotalAttempts, &stats.CorrectCount, &stats.AverageMastery); err != nil {
+		return progress.Stats{}, app.Internal(err)
+	}
+	if stats.TotalAttempts > 0 {
+		stats.Accuracy = float64(stats.CorrectCount) / float64(stats.TotalAttempts)
+	}
+	return stats, nil
+}
+
+func (s *Store) GetRecommendations(ctx context.Context, userID int64) ([]progress.Recommendation, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT oge_number, subtype_code, mastery_score::float8
+		FROM progress
+		WHERE user_id = $1
+		ORDER BY mastery_score ASC, attempts_count DESC, updated_at ASC
+		LIMIT 5
+	`, userID)
+	if err != nil {
+		return nil, app.Internal(err)
+	}
+	defer rows.Close()
+
+	recommendations := make([]progress.Recommendation, 0)
+	for rows.Next() {
+		var rec progress.Recommendation
+		if err := rows.Scan(&rec.OgeNumber, &rec.SubtypeCode, &rec.MasteryScore); err != nil {
+			return nil, app.Internal(err)
+		}
+		rec.Message = "Рекомендуем потренировать эту тему"
+		recommendations = append(recommendations, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, app.Internal(err)
+	}
+	return recommendations, nil
+}
+
+func scanTarget(row pgx.Row, notFoundMessage string) (tasks.Target, error) {
+	var target tasks.Target
+	var taskTypeID sql.NullInt64
+	if err := row.Scan(&taskTypeID, &target.OgeNumber, &target.SubtypeCode); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tasks.Target{}, app.NotFound(notFoundMessage)
+		}
+		return tasks.Target{}, app.Internal(err)
+	}
+	target.TaskTypeID = ptrFromNullInt64(taskTypeID)
+	return target, nil
+}
+
+func collectTargets(rows pgx.Rows) ([]tasks.Target, error) {
+	targets := make([]tasks.Target, 0, 14)
+	for rows.Next() {
+		var target tasks.Target
+		var taskTypeID sql.NullInt64
+		if err := rows.Scan(&taskTypeID, &target.OgeNumber, &target.SubtypeCode); err != nil {
+			return nil, app.Internal(err)
+		}
+		target.TaskTypeID = ptrFromNullInt64(taskTypeID)
+		targets = append(targets, target)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, app.Internal(err)
+	}
+	return targets, nil
+}
+
+func scanGeneratedTask(row pgx.Row) (tasks.Task, error) {
+	var task tasks.Task
+	var stepsJSON []byte
+	var taskTypeID sql.NullInt64
+	if err := row.Scan(
+		&task.ID,
+		&task.UserID,
+		&task.Mode,
+		&taskTypeID,
+		&task.OgeNumber,
+		&task.SubtypeCode,
+		&task.Question,
+		&task.CorrectAnswer,
+		&stepsJSON,
+		&task.SelfCheck,
+		&task.IsValid,
+		&task.ValidationNotes,
+		&task.Source,
+		&task.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tasks.Task{}, app.NotFound("Задача не найдена")
+		}
+		return tasks.Task{}, app.Internal(err)
+	}
+	if len(stepsJSON) > 0 {
+		_ = json.Unmarshal(stepsJSON, &task.SolutionSteps)
+	}
+	task.TaskTypeID = ptrFromNullInt64(taskTypeID)
+	return task, nil
+}
+
+func ptrFromNullInt64(value sql.NullInt64) *int64 {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Int64
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
