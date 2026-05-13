@@ -34,3 +34,6 @@ go.work.sum
 # Frontend
 oge-frontend/
 node_modules/
+
+# Local nested backend checkout
+oge-backend/
