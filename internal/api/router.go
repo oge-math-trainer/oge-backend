@@ -28,6 +28,7 @@ type TaskService interface {
 
 type DiagnosticService interface {
 	Start(ctx context.Context, userID int64) (diagnostic.StartResult, error)
+	Next(ctx context.Context, userID, sessionID int64) (diagnostic.NextResult, error)
 	Submit(ctx context.Context, userID, sessionID int64, answers []diagnostic.AnswerInput) (diagnostic.SubmitResult, error)
 }
 
@@ -99,6 +100,7 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	mux.Handle("GET /api/v1/auth/me", server.requireAuth(http.HandlerFunc(server.handleMe)))
 	mux.Handle("POST /api/v1/diagnostic/start", server.requireAuth(http.HandlerFunc(server.handleDiagnosticStart)))
+	mux.Handle("POST /api/v1/diagnostic/next", server.requireAuth(http.HandlerFunc(server.handleDiagnosticNext)))
 	mux.Handle("POST /api/v1/diagnostic/submit", server.requireAuth(http.HandlerFunc(server.handleDiagnosticSubmit)))
 	mux.Handle("POST /api/v1/tasks/generate", server.requireAuth(http.HandlerFunc(server.handleTaskGenerate)))
 	mux.Handle("POST /api/v1/tasks/check", server.requireAuth(http.HandlerFunc(server.handleTaskCheck)))

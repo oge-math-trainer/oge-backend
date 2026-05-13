@@ -3,16 +3,27 @@ package diagnostic
 import (
 	"context"
 	"errors"
-	"fmt"  // ← ДОБАВЬ
-	"time" // ← ДОБАВЬ
+	"fmt"
+	"time"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
 type StartResult struct {
-	SessionID int64        `json:"session_id"`
-	Tasks     []tasks.Task `json:"tasks"`
+	SessionID      int64        `json:"session_id"`
+	Tasks          []tasks.Task `json:"tasks"`
+	TotalTasks     int          `json:"total_tasks"`
+	GeneratedCount int          `json:"generated_count"`
+	Complete       bool         `json:"complete"`
+}
+
+type NextResult struct {
+	SessionID      int64       `json:"session_id"`
+	Task           *tasks.Task `json:"task,omitempty"`
+	TotalTasks     int         `json:"total_tasks"`
+	GeneratedCount int         `json:"generated_count"`
+	Complete       bool        `json:"complete"`
 }
 
 type AnswerInput struct {
@@ -44,7 +55,11 @@ type Repository interface {
 	CreateDiagnosticSession(ctx context.Context, userID int64) (int64, error)
 	EnsureDiagnosticSessionOwner(ctx context.Context, userID, sessionID int64) error
 	GetDiagnosticTargets(ctx context.Context) ([]tasks.Target, error)
-	GetGeneratedTaskForUser(ctx context.Context, userID, id int64) (tasks.Task, error)
+
+	AttachTaskToSession(ctx context.Context, sessionID, taskID int64) error
+	GetTasksBySession(ctx context.Context, sessionID int64) ([]tasks.Task, error)
+	GetTaskBySession(ctx context.Context, sessionID, taskID int64) (tasks.Task, error)
+
 	SaveDiagnosticAnswer(ctx context.Context, sessionID int64, task tasks.Task, studentAnswer string, isCorrect bool, feedback any) error
 	FinishDiagnosticSession(ctx context.Context, sessionID int64, analysis Analysis, weakTopics []string) error
 	UpdateProgress(ctx context.Context, userID int64, task tasks.Task, isCorrect bool) error
@@ -75,58 +90,9 @@ func (s *Service) Start(ctx context.Context, userID int64) (StartResult, error) 
 	if err != nil {
 		return StartResult{}, err
 	}
+
 	if len(targets) < 14 {
 		return StartResult{}, app.NotFound("Не найдены 14 типов заданий для диагностики")
-	}
-
-	out := make([]tasks.Task, 0, 14)
-	
-	for _, target := range targets[:14] {
-		oge := target.OgeNumber
-		
-		// 🔁 Retry-логика: 3 попытки на задачу
-		var task tasks.Task
-		var lastErr error
-		const maxRetries = 3
-		
-		for attempt := 1; attempt <= maxRetries; attempt++ {
-			task, err = s.tasks.Generate(ctx, tasks.GenerateRequest{
-				UserID:      userID,
-				Mode:        tasks.ModeCustom,
-				StoredMode:  tasks.ModeDiagnostic,
-				OgeNumber:   &oge,
-				SubtypeCode: target.SubtypeCode,
-			})
-			if err == nil {
-				break // ✅ Успех
-			}
-			
-			lastErr = err
-			fmt.Printf("⚠️ Diagnostic task OGE#%d attempt %d/%d failed: %v\n", 
-				target.OgeNumber, attempt, maxRetries, err)
-			
-			// Небольшая пауза перед повтором
-			select {
-			case <-ctx.Done():
-				return StartResult{}, ctx.Err()
-			case <-time.After(300 * time.Millisecond):
-				// продолжаем
-			}
-		}
-		
-		// Если после всех попыток не вышло — логируем и пропускаем задачу
-		if lastErr != nil {
-			fmt.Printf("❌ Skipped OGE#%d in diagnostic after %d attempts: %v\n", 
-				target.OgeNumber, maxRetries, lastErr)
-			continue // ↪️ Переходим к следующей задаче
-		}
-		
-		out = append(out, task)
-	}
-	
-	// Если не сгенерировалось ни одной задачи — это реальная ошибка
-	if len(out) == 0 {
-		return StartResult{}, app.AIUnavailable(errors.New("diagnostic: failed to generate any tasks"))
 	}
 
 	sessionID, err := s.repo.CreateDiagnosticSession(ctx, userID)
@@ -134,50 +100,221 @@ func (s *Service) Start(ctx context.Context, userID int64) (StartResult, error) 
 		return StartResult{}, err
 	}
 
-	return StartResult{SessionID: sessionID, Tasks: out}, nil
+	task, generatedCount, complete, err := s.generateNextTask(ctx, userID, sessionID, targets[:14], nil)
+	if err != nil {
+		return StartResult{}, err
+	}
+
+	return StartResult{
+		SessionID:      sessionID,
+		Tasks:          []tasks.Task{task},
+		TotalTasks:     len(targets[:14]),
+		GeneratedCount: generatedCount,
+		Complete:       complete,
+	}, nil
 }
-func (s *Service) Submit(ctx context.Context, userID, sessionID int64, answers []AnswerInput) (SubmitResult, error) {
+
+func (s *Service) Next(ctx context.Context, userID, sessionID int64) (NextResult, error) {
+	if err := s.repo.EnsureDiagnosticSessionOwner(ctx, userID, sessionID); err != nil {
+		return NextResult{}, err
+	}
+
+	targets, err := s.repo.GetDiagnosticTargets(ctx)
+	if err != nil {
+		return NextResult{}, err
+	}
+	if len(targets) < 14 {
+		return NextResult{}, app.NotFound("Не найдены 14 типов заданий для диагностики")
+	}
+
+	existingTasks, err := s.repo.GetTasksBySession(ctx, sessionID)
+	if err != nil {
+		return NextResult{}, err
+	}
+
+	task, generatedCount, complete, err := s.generateNextTask(ctx, userID, sessionID, targets[:14], existingTasks)
+	if err != nil {
+		return NextResult{}, err
+	}
+
+	result := NextResult{
+		SessionID:      sessionID,
+		TotalTasks:     len(targets[:14]),
+		GeneratedCount: generatedCount,
+		Complete:       complete,
+	}
+	if !complete {
+		result.Task = &task
+	}
+	return result, nil
+}
+
+func (s *Service) generateNextTask(
+	ctx context.Context,
+	userID, sessionID int64,
+	targets []tasks.Target,
+	existingTasks []tasks.Task,
+) (tasks.Task, int, bool, error) {
+	generatedOgeNumbers := make(map[int]struct{}, len(existingTasks))
+	for _, task := range existingTasks {
+		generatedOgeNumbers[task.OgeNumber] = struct{}{}
+	}
+	if len(generatedOgeNumbers) >= len(targets) {
+		return tasks.Task{}, len(existingTasks), true, nil
+	}
+
+	var lastErr error
+	for _, target := range targets {
+		if _, exists := generatedOgeNumbers[target.OgeNumber]; exists {
+			continue
+		}
+
+		task, err := s.generateTaskForTarget(ctx, userID, target)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if err := s.repo.AttachTaskToSession(ctx, sessionID, task.ID); err != nil {
+			return tasks.Task{}, len(existingTasks), false, err
+		}
+
+		generatedCount := len(existingTasks) + 1
+		return task, generatedCount, generatedCount >= len(targets), nil
+	}
+
+	if lastErr != nil {
+		return tasks.Task{}, len(existingTasks), false, lastErr
+	}
+	return tasks.Task{}, len(existingTasks), true, nil
+}
+
+func (s *Service) generateTaskForTarget(ctx context.Context, userID int64, target tasks.Target) (tasks.Task, error) {
+	oge := target.OgeNumber
+
+	var task tasks.Task
+	var lastErr error
+	const maxRetries = 3
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		var err error
+		task, err = s.tasks.Generate(ctx, tasks.GenerateRequest{
+			UserID:      userID,
+			Mode:        tasks.ModeCustom,
+			StoredMode:  tasks.ModeDiagnostic,
+			OgeNumber:   &oge,
+			SubtypeCode: target.SubtypeCode,
+		})
+		if err == nil {
+			return task, nil
+		}
+
+		lastErr = err
+		fmt.Printf("diag generate fail OGE#%d attempt %d/%d: %v\n",
+			target.OgeNumber, attempt, maxRetries, err)
+
+		select {
+		case <-ctx.Done():
+			return tasks.Task{}, ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+
+	if lastErr != nil {
+		return tasks.Task{}, lastErr
+	}
+	return tasks.Task{}, app.AIUnavailable(errors.New("no diagnostic task generated"))
+}
+
+func (s *Service) Submit(
+	ctx context.Context,
+	userID, sessionID int64,
+	answers []AnswerInput,
+) (SubmitResult, error) {
+
 	if err := s.repo.EnsureDiagnosticSessionOwner(ctx, userID, sessionID); err != nil {
 		return SubmitResult{}, err
 	}
 
-	if s.ai == nil || !s.ai.IsConfigured() {
-		return SubmitResult{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
-	}
+	aiEnabled := s.ai != nil && s.ai.IsConfigured()
 
 	results := make([]AnswerResult, 0, len(answers))
+
 	for _, answer := range answers {
-		task, err := s.repo.GetGeneratedTaskForUser(ctx, userID, answer.TaskID)
+
+		task, err := s.repo.GetTaskBySession(ctx, sessionID, answer.TaskID)
 		if err != nil {
 			return SubmitResult{}, err
 		}
-		check, err := s.ai.CheckAnswer(ctx, task, answer.StudentAnswer)
-		if err != nil {
+
+		var (
+			isCorrect bool
+			feedback  string
+		)
+
+		if aiEnabled {
+			check, err := s.ai.CheckAnswer(ctx, task, answer.StudentAnswer)
+			if err != nil {
+				return SubmitResult{}, err
+			}
+
+			isCorrect = check.IsCorrect
+			feedback = check.ShortFeedback
+		} else {
+			isCorrect = false
+			feedback = "AI недоступен"
+		}
+
+		if err := s.repo.SaveDiagnosticAnswer(
+			ctx,
+			sessionID,
+			task,
+			answer.StudentAnswer,
+			isCorrect,
+			nil,
+		); err != nil {
 			return SubmitResult{}, err
 		}
-		if err := s.repo.SaveDiagnosticAnswer(ctx, sessionID, task, answer.StudentAnswer, check.IsCorrect, check); err != nil {
+
+		if err := s.repo.UpdateProgress(ctx, userID, task, isCorrect); err != nil {
 			return SubmitResult{}, err
 		}
-		if err := s.repo.UpdateProgress(ctx, userID, task, check.IsCorrect); err != nil {
-			return SubmitResult{}, err
-		}
+
 		results = append(results, AnswerResult{
 			TaskID:        task.ID,
 			OgeNumber:     task.OgeNumber,
 			SubtypeCode:   task.SubtypeCode,
 			StudentAnswer: answer.StudentAnswer,
-			IsCorrect:     check.IsCorrect,
-			Feedback:      check.ShortFeedback,
+			IsCorrect:     isCorrect,
+			Feedback:      feedback,
 		})
 	}
 
-	analysis, err := s.ai.AnalyzeDiagnostic(ctx, results)
-	if err != nil {
-		return SubmitResult{}, err
+	var analysis Analysis
+	var err error
+
+	if len(results) == 0 {
+		analysis = Analysis{
+			Summary: "Диагностика завершена без ответов",
+		}
+	} else if aiEnabled {
+		analysis, err = s.ai.AnalyzeDiagnostic(ctx, results)
+		if err != nil {
+			return SubmitResult{}, err
+		}
+	} else {
+		analysis = Analysis{
+			Summary: "AI выключен",
+		}
 	}
+
 	if err := s.repo.FinishDiagnosticSession(ctx, sessionID, analysis, analysis.WeakTopics); err != nil {
 		return SubmitResult{}, err
 	}
 
-	return SubmitResult{SessionID: sessionID, Answers: results, Analysis: analysis}, nil
+	return SubmitResult{
+		SessionID: sessionID,
+		Answers:   results,
+		Analysis:  analysis,
+	}, nil
 }

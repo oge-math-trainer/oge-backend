@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -97,6 +98,11 @@ func (c *Client) CheckAnswer(ctx context.Context, task tasks.Task, studentAnswer
 	if err := c.completeJSON(ctx, prompt, &out); err != nil {
 		return tasks.CheckResult{}, err
 	}
+
+	// Очищаем feedback от LaTeX
+	out.ShortFeedback = sanitizeAIResponse(out.ShortFeedback)
+	out.Reason = sanitizeAIResponse(out.Reason)
+
 	return out, nil
 }
 
@@ -135,6 +141,13 @@ func (c *Client) AnalyzeDiagnostic(ctx context.Context, answers []diagnostic.Ans
 	if err := c.completeJSON(ctx, prompt, &out); err != nil {
 		return diagnostic.Analysis{}, err
 	}
+
+	// Очищаем summary и weak_topics от LaTeX
+	out.Summary = sanitizeAIResponse(out.Summary)
+	for i := range out.WeakTopics {
+		out.WeakTopics[i] = sanitizeAIResponse(out.WeakTopics[i])
+	}
+
 	return out, nil
 }
 
@@ -203,8 +216,11 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		}
 	}
 
+	// 🧹 Очищаем LaTeX ДО парсинга JSON
+	content = sanitizeAIResponse(content)
+
 	// 🔍 Логируем сырой ответ перед парсингом
-	fmt.Println("🔍 AI RAW RESPONSE:", content)
+	fmt.Println("🔍 AI RAW RESPONSE (после очистки):", content)
 
 	if err := json.Unmarshal([]byte(content), out); err != nil {
 		// 🔍 Логируем конкретную ошибку парсинга
@@ -249,9 +265,73 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-// cleanLaTeX удаляет ВСЕ знаки доллара из текста
+// sanitizeAIResponse очищает ответ AI от типичных LaTeX артефактов
 // Это предотвращает ошибку "ambiguous parameter type" в PostgreSQL
-// Пример: "$x^2 + b_1 = 0$" → "x^2 + b_1 = 0"
+func sanitizeAIResponse(raw string) string {
+	raw = strings.TrimSpace(raw)
+
+	// Убираем markdown блоки
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+
+	// Извлекаем JSON между { и }
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start >= 0 && end > start {
+		raw = raw[start : end+1]
+	}
+
+	// === ОСНОВНАЯ ЧИСТКА LaTeX ===
+
+	// 1. Заменяем `\ \` (бэкслеш-пробел-бэкслеш-пробел) на пусто
+	raw = strings.ReplaceAll(raw, `\ \ `, "")
+	raw = strings.ReplaceAll(raw, `\ \`, "")
+
+	// 2. Убираем LaTeX-обрамление
+	raw = strings.ReplaceAll(raw, `\(`, "")
+	raw = strings.ReplaceAll(raw, `\)`, "")
+	raw = strings.ReplaceAll(raw, `\[`, "")
+	raw = strings.ReplaceAll(raw, `\]`, "")
+	raw = strings.ReplaceAll(raw, `\\(`, "")
+	raw = strings.ReplaceAll(raw, `\\)`, "")
+	raw = strings.ReplaceAll(raw, `\\[`, "")
+	raw = strings.ReplaceAll(raw, `\\]`, "")
+
+	// 3. Убираем \begin и \end блоки
+	raw = strings.ReplaceAll(raw, `\begin{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\end{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\\begin{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\\end{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\begin`, "")
+	raw = strings.ReplaceAll(raw, `\end`, "")
+
+	// 4. Заменяем \frac{a}{b} → a/b
+	reFrac := regexp.MustCompile(`\\frac\{([^}]+)\}\{([^}]+)\}`)
+	raw = reFrac.ReplaceAllString(raw, "$1/$2")
+
+	// 5. Заменяем \sqrt{a} → sqrt(a)
+	reSqrt := regexp.MustCompile(`\\sqrt\{([^}]+)\}`)
+	raw = reSqrt.ReplaceAllString(raw, "sqrt($1)")
+
+	// 6. Убираем бэкслеши перед буквами, цифрами и спецсимволами
+	// Это обрабатывает `\14/5` -> `14/5`, `\x` -> `x`, и т.д.
+	raw = regexp.MustCompile(`\\{1,2}([a-zA-Z0-9{}()^/_\-+*=])`).ReplaceAllString(raw, "$1")
+
+	// 7. Убираем оставшиеся двойные бэкслеши и одиночные
+	raw = strings.ReplaceAll(raw, `\\`, "")
+	raw = strings.ReplaceAll(raw, `\`, "")
+
+	// 8. Убираем знаки доллара
+	raw = strings.ReplaceAll(raw, "$", "")
+
+	// 9. Очищаем множественные пробелы (оставляем один)
+	raw = regexp.MustCompile(`\s+`).ReplaceAllString(raw, " ")
+
+	return strings.TrimSpace(raw)
+}
+
+// cleanLaTeX удаляет ВСЕ знаки доллара из текста (для обратной совместимости)
 func cleanLaTeX(text string) string {
 	return strings.ReplaceAll(text, "$", "")
 }

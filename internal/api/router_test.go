@@ -146,6 +146,27 @@ func TestTaskGenerateCustomRequiresTargetFields(t *testing.T) {
 	assertJSONCode(t, resp.Body.Bytes(), app.CodeValidation, false)
 }
 
+func TestDiagnosticSubmitNotFoundReturns404(t *testing.T) {
+	router := NewRouter(Dependencies{
+		Auth:               fakeAuthService{},
+		Tasks:              fakeTaskService{},
+		Diagnostic:         fakeDiagnosticService{submitErr: app.NotFound("task not found")},
+		Progress:           fakeProgressService{},
+		Health:             fakeHealth{},
+		CORSAllowedOrigins: []string{"http://localhost:5173"},
+	})
+
+	resp := httptest.NewRecorder()
+	req := jsonRequest(http.MethodPost, "/api/v1/diagnostic/submit", `{"session_id":1,"answers":[{"task_id":434,"student_answer":"3"}]}`)
+	req.Header.Set("Authorization", "Bearer good-token")
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	assertJSONCode(t, resp.Body.Bytes(), app.CodeNotFound, false)
+}
+
 func TestCORSAllowsLocalhost(t *testing.T) {
 	router := testRouter(testDeps{})
 
@@ -282,13 +303,22 @@ func (fakeTaskService) Explain(context.Context, int64, int64) (tasks.ExplainResu
 	return tasks.ExplainResult{Explanation: "explain"}, nil
 }
 
-type fakeDiagnosticService struct{}
+type fakeDiagnosticService struct {
+	submitErr error
+}
 
-func (fakeDiagnosticService) Start(context.Context, int64) (diagnostic.StartResult, error) {
+func (f fakeDiagnosticService) Start(context.Context, int64) (diagnostic.StartResult, error) {
 	return diagnostic.StartResult{SessionID: 1}, nil
 }
 
-func (fakeDiagnosticService) Submit(context.Context, int64, int64, []diagnostic.AnswerInput) (diagnostic.SubmitResult, error) {
+func (f fakeDiagnosticService) Next(context.Context, int64, int64) (diagnostic.NextResult, error) {
+	return diagnostic.NextResult{SessionID: 1}, nil
+}
+
+func (f fakeDiagnosticService) Submit(context.Context, int64, int64, []diagnostic.AnswerInput) (diagnostic.SubmitResult, error) {
+	if f.submitErr != nil {
+		return diagnostic.SubmitResult{}, f.submitErr
+	}
 	return diagnostic.SubmitResult{SessionID: 1}, nil
 }
 

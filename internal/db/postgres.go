@@ -225,13 +225,13 @@ func (s *Store) UpdateProgress(ctx context.Context, userID int64, task tasks.Tas
 			correct_count,
 			mastery_score
 		)
-		VALUES ($1, $2, $3, $4, 1, $5, $5::numeric)
+		VALUES ($1, $2, $3, $4, 1, $5::int, $5::int::numeric)
 		ON CONFLICT (user_id, oge_number, subtype_code)
 		DO UPDATE SET
 			task_type_id = COALESCE(EXCLUDED.task_type_id, progress.task_type_id),
 			attempts_count = progress.attempts_count + 1,
-			correct_count = progress.correct_count + $5,
-			mastery_score = ((progress.correct_count + $5)::numeric / (progress.attempts_count + 1)::numeric),
+			correct_count = progress.correct_count + $5::int,
+			mastery_score = ((progress.correct_count + $5::int)::numeric / (progress.attempts_count + 1)::numeric),
 			updated_at = now()
 	`, userID, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, correctDelta)
 	if err != nil {
@@ -308,7 +308,7 @@ func (s *Store) SaveDiagnosticAnswer(ctx context.Context, sessionID int64, task 
 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO diagnostic_answers (session_id, generated_task_id, student_answer, is_correct, ai_feedback)
-		VALUES ($1, $2, $3, $4, $5::jsonb)
+		VALUES ($1, $2, $3, $4, $5)
 	`, sessionID, task.ID, studentAnswer, isCorrect, feedbackJSON)
 	if err != nil {
 		return app.Internal(err)
@@ -338,6 +338,72 @@ func (s *Store) FinishDiagnosticSession(ctx context.Context, sessionID int64, an
 		return app.Internal(err)
 	}
 	return nil
+}
+
+func (s *Store) AttachTaskToSession(ctx context.Context, sessionID, taskID int64) error {
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO diagnostic_session_tasks (session_id, generated_task_id)
+		SELECT $1, $2
+		WHERE EXISTS (
+			SELECT 1
+			FROM diagnostic_sessions
+			WHERE id = $1 AND status = 'started'
+		)
+		ON CONFLICT (session_id, generated_task_id) DO NOTHING
+	`, sessionID, taskID)
+	if err != nil {
+		return app.Internal(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return app.NotFound("Диагностическая сессия завершена")
+	}
+	return nil
+}
+
+func (s *Store) GetTasksBySession(ctx context.Context, sessionID int64) ([]tasks.Task, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT gt.id, gt.user_id, gt.mode, gt.task_type_id, gt.oge_number, gt.subtype_code, 
+		       gt.question, gt.correct_answer, COALESCE(gt.solution_steps, '[]'::jsonb), 
+		       COALESCE(gt.self_check, ''), gt.is_valid, COALESCE(gt.validation_notes, ''), 
+		       gt.generation_source, gt.created_at
+		FROM diagnostic_session_tasks dst
+		JOIN generated_tasks gt ON dst.generated_task_id = gt.id
+		WHERE dst.session_id = $1
+		  AND gt.mode = 'diagnostic'
+		ORDER BY gt.oge_number, dst.created_at
+	`, sessionID)
+	if err != nil {
+		return nil, app.Internal(err)
+	}
+	defer rows.Close()
+
+	out := make([]tasks.Task, 0)
+	for rows.Next() {
+		task, err := scanGeneratedTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, app.Internal(err)
+	}
+	return out, nil
+}
+
+func (s *Store) GetTaskBySession(ctx context.Context, sessionID, taskID int64) (tasks.Task, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT gt.id, gt.user_id, gt.mode, gt.task_type_id, gt.oge_number, gt.subtype_code, 
+		       gt.question, gt.correct_answer, COALESCE(gt.solution_steps, '[]'::jsonb), 
+		       COALESCE(gt.self_check, ''), gt.is_valid, COALESCE(gt.validation_notes, ''), 
+		       gt.generation_source, gt.created_at
+		FROM diagnostic_session_tasks dst
+		JOIN generated_tasks gt ON dst.generated_task_id = gt.id
+		WHERE dst.session_id = $1
+		  AND gt.id = $2
+		  AND gt.mode = 'diagnostic'
+	`, sessionID, taskID)
+	return scanGeneratedTask(row)
 }
 
 func (s *Store) GetProgress(ctx context.Context, userID int64) ([]progress.Item, error) {

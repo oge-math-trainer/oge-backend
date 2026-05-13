@@ -4,41 +4,77 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
 
-// cleanLatex убирает LaTeX-разметку которую добавляют некоторые модели
+// sanitizeAIResponse очищает ответ AI от типичных LaTeX артефактов
 func sanitizeAIResponse(raw string) string {
 	raw = strings.TrimSpace(raw)
 
-	// remove markdown
+	// Убираем markdown
 	raw = strings.TrimPrefix(raw, "```json")
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 
-	// extract JSON object
+	// Извлекаем JSON
 	start := strings.Index(raw, "{")
 	end := strings.LastIndex(raw, "}")
-
-	if start >= 0 && end >= 0 && end > start {
+	if start >= 0 && end > start {
 		raw = raw[start : end+1]
 	}
 
-	// FIX INVALID ESCAPES
-	re := regexp.MustCompile(`\\+([\(\)\[\]])`)
-	raw = re.ReplaceAllString(raw, "$1")
+	// === ОСНОВНАЯ ЧИСТКА ===
 
-	// remove stray backslashes before normal chars
-	re2 := regexp.MustCompile(`\\([a-zA-Z])`)
-	raw = re2.ReplaceAllString(raw, "$1")
+	// 1. Заменяем `\ \` (бэкслеш-пробел-бэкслеш-пробел) на пусто
+	raw = strings.ReplaceAll(raw, `\ \ `, "")
+	raw = strings.ReplaceAll(raw, `\ \`, "")
+
+	// 2. Убираем LaTeX-обрамление
+	raw = strings.ReplaceAll(raw, `\(`, "")
+	raw = strings.ReplaceAll(raw, `\)`, "")
+	raw = strings.ReplaceAll(raw, `\[`, "")
+	raw = strings.ReplaceAll(raw, `\]`, "")
+	raw = strings.ReplaceAll(raw, `\\(`, "")
+	raw = strings.ReplaceAll(raw, `\\)`, "")
+	raw = strings.ReplaceAll(raw, `\\[`, "")
+	raw = strings.ReplaceAll(raw, `\\]`, "")
+
+	// 3. Убираем \begin и \end
+	raw = strings.ReplaceAll(raw, `\begin{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\end{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\\begin{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\\end{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\begin`, "")
+	raw = strings.ReplaceAll(raw, `\end`, "")
+
+	// 4. Заменяем \frac{a}{b} → a/b
+	reFrac := regexp.MustCompile(`\\frac\{([^}]+)\}\{([^}]+)\}`)
+	raw = reFrac.ReplaceAllString(raw, "$1/$2")
+
+	reCdot := regexp.MustCompile(`\\cdot`)
+	raw = reCdot.ReplaceAllString(raw, "*")
+
+	// 5. Заменяем \sqrt{a} → sqrt(a)
+	reSqrt := regexp.MustCompile(`\\sqrt\{([^}]+)\}`)
+	raw = reSqrt.ReplaceAllString(raw, "sqrt($1)")
+
+	// 6. Убираем бэкслеши перед буквами, цифрами и спецсимволами
+	raw = regexp.MustCompile(`\\{1,2}([a-zA-Z0-9{}()^/_\-+*=])`).ReplaceAllString(raw, "$1")
+
+	// 7. Убираем оставшиеся двойные бэкслеши и одиночные
+	raw = strings.ReplaceAll(raw, `\\`, "")
+	raw = strings.ReplaceAll(raw, `\`, "")
+
+	// 8. Убираем знаки доллара
+	raw = strings.ReplaceAll(raw, "$", "")
+
+	// 9. Очищаем множественные пробелы (оставляем один)
+	raw = regexp.MustCompile(`\s+`).ReplaceAllString(raw, " ")
 
 	return strings.TrimSpace(raw)
-
 }
 
 // validAnswerRe проверяет что ответ содержит только цифры, запятую и минус
@@ -55,97 +91,44 @@ func validateAnswer(answer string) error {
 	return nil
 }
 
-type catalogEntry struct {
-	Title            string   `json:"title"`
-	Description      string   `json:"description"`
-	Example          string   `json:"example"`
-	ForbiddenTopics  []string `json:"forbidden_topics"`
-	RequiredKeywords []string `json:"required_keywords"`
-}
-
-func loadCatalogEntry(ogeNumber int, subtypeCode string) catalogEntry {
-	data, err := os.ReadFile("task_catalog.json")
-	if err != nil {
-		return catalogEntry{}
-	}
-	var catalog map[string]map[string]catalogEntry
-	if err := json.Unmarshal(data, &catalog); err != nil {
-		return catalogEntry{}
-	}
-	key := strconv.Itoa(ogeNumber)
-	if subtypes, ok := catalog[key]; ok {
-		if entry, ok := subtypes[subtypeCode]; ok {
-			return entry
-		}
-	}
-	return catalogEntry{}
-}
-
 // IsConfigured проверяет что клиент настроен (ключ задан)
 func (c *Client) IsConfigured() bool {
 	return c.apiKey != ""
 }
 
-func buildSubtypePrompt(entry catalogEntry) string {
-	if entry.Title == "" {
-		return ""
-	}
-
-	prompt := fmt.Sprintf(`
-
-TASK SUBTYPE REQUIREMENTS:
-Title: %s
-Description: %s
-Example of VALID task: %s
-
-STRICT RULES:
-- The generated task MUST correspond exactly to this subtype.
-- Do NOT generate tasks from other mathematical topics.
-- Do NOT generate physics or motion problems unless explicitly required.
-- The generated problem must resemble real OGE tasks.
-`, entry.Title, entry.Description, entry.Example)
-
-	if len(entry.ForbiddenTopics) > 0 {
-		prompt += "\nFORBIDDEN TOPICS (never use these):\n"
-		for _, t := range entry.ForbiddenTopics {
-			prompt += "- " + t + "\n"
-		}
-	}
-
-	if len(entry.RequiredKeywords) > 0 {
-		prompt += "\nREQUIRED: task must involve:\n"
-		for _, k := range entry.RequiredKeywords {
-			prompt += "- " + k + "\n"
-		}
-	}
-
-	return prompt
-}
-
 // GenerateTask генерирует задание ОГЭ по математике
 func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
-	systemPrompt := `You are an expert mathematics teacher specializing in Russian OGE exam preparation.
-Generate one math problem for the OGE exam.
-Respond ONLY with valid JSON. No markdown, no code blocks, no text before or after. Start with { and end with }.
-Return exactly this structure:
+
+	systemPrompt := `You are an expert mathematics teacher for Russian OGE exam.
+
+Generate ONE math problem. 
+
+Respond ONLY with valid JSON, nothing else. No explanations, no markdown, no code blocks.
+
 {
-  "question": "full problem statement in Russian",
-  "correct_answer": "digits/comma/minus only, no spaces, no letters",
-  "solution_steps": ["step 1", "step 2", "step 3"],
-  "self_check": "how to verify the answer",
+  "question": "Текст задачи на русском языке",
+  "correct_answer": "только цифры, минус и запятая",
+  "solution_steps": ["шаг 1", "шаг 2", "шаг 3"],
+  "self_check": "как проверить ответ",
   "is_valid": true,
   "validation_notes": ""
 }
-Rules:
-- All text in Russian
-- correct_answer must contain only digits (0-9), minus (-), comma (,). No spaces, no letters, no dots.
-- solution_steps minimum 3 steps, maximum 7
-- Problem must match real OGE difficulty for 9th grade
-- DO NOT use any greek letters.
-- DO NOT use markdown
-- RETURN VALID JSON ONLY
-- Mathematical problems should not be based on pictures and should not require pictures to solve them.
-- SPECIAL RULE FOR oge_number 11:
+
+СТРОГО ЗАПРЕЩЕНО:
+- Использовать любой LaTeX: \( \), \[ \], \begin, \end, \\(
+- Использовать двойные бэкслеши \\
+- Использовать \frac, \sqrt, \begin{cases} и любые другие LaTeX команды
+- Использовать символы $ для математики
+
+Для записи формул используй ТОЛЬКО простой текст:
+Правильно: "x^2 + 3x - 5 = 0" или "2x + y = 5"
+Неправильно: anything with \( or \begin
+
+All text must be in Russian.
+correct_answer — только цифры, запятая и минус, без пробелов.
+Do not add any extra text outside JSON.
+
+    // ... остальной код без изменений
 
 For oge_number 11:
 correct_answer may contain graph matching notation like:
@@ -191,16 +174,26 @@ If the task requires matching graphs to formulas, "correct_answer" must be like 
 For all other oge_number values, do NOT include the "graphs" field.
 
 IMPORTANT JSON RULES:
-
+CRITICAL RULE FOR FRACTIONS:
+- Use only plain text: 1/2, 3/4, 5/2, a/b
+- NEVER use \frac{}, \\frac{}, or any LaTeX commands
+- Do not use backslashes at all in mathematical expressions
+IMPORTANT:
+- Do NOT use any LaTeX at all.
+- Do NOT use backslashes before ( ) [ ] or letters.
+- Output clean JSON only.
 NEVER use LaTeX delimiters: \( \), \[ \], $$ $$
 NEVER use backslashes in mathematical expressions
 NEVER escape parentheses
 Use only plain UTF-8 text
 Example correct: "x^2 + 2x - 3 = 0"
-Example wrong: "(x^2 + 2x - 3 = 0)"`
-
-	entry := loadCatalogEntry(target.OgeNumber, target.SubtypeCode)
-	systemPrompt += buildSubtypePrompt(entry)
+Example wrong: "(x^2 + 2x - 3 = 0)"
+FINAL STRICT RULE:
+You MUST NOT use any of these: \(  \)  \[  \]  \\(  \\)  \\[  \\]  \begin  \end
+All math expressions must be written in plain text only, for example: 
+"x + y = 5" or "2x - y = 1" or "x = 2"
+Never wrap math in any LaTeX delimiters.
+`
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
@@ -214,7 +207,7 @@ Example wrong: "(x^2 + 2x - 3 = 0)"`
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)
 	}
 
-	raw, err := c.Chat(systemPrompt, string(inputBytes), 800, 0.5)
+	raw, err := c.Chat(systemPrompt, string(inputBytes), 800, 0.7)
 	fmt.Println("RAW:", raw)
 	if err != nil {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: %w", err)

@@ -3,13 +3,14 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"  // ← ДОБАВЛЕНО: нужен для отладочного вывода
+	"fmt" // ← ДОБАВЛЕНО: нужен для отладочного вывода
 	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/oge-math-trainer/oge-backend.git/internal/ai"
 	"github.com/oge-math-trainer/oge-backend.git/internal/api"
 	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
@@ -21,6 +22,22 @@ import (
 )
 
 func main() {
+	if err := godotenv.Load(); err != nil {
+		// Пробуем разные возможные пути
+		paths := []string{
+			"../../../.env", // из cmd/server
+			"../../.env",    // из cmd/
+			"../.env",       // из oge-backend/
+			".env",          // текущая папка
+		}
+
+		for _, path := range paths {
+			if err := godotenv.Load(path); err == nil {
+				log.Printf("✅ Loaded .env from: %s", path)
+				break
+			}
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

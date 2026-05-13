@@ -92,8 +92,8 @@ type FallbackTask struct {
 }
 
 type GenerateRequest struct {
-	UserID int64
-	Mode   string
+	UserID      int64
+	Mode        string
 	StoredMode  string
 	OgeNumber   *int
 	SubtypeCode string
@@ -198,7 +198,17 @@ func (s *Service) Check(ctx context.Context, req CheckRequest) (CheckResult, err
 	if s.ai == nil || !s.ai.IsConfigured() {
 		return CheckResult{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
-	return s.ai.CheckAnswer(ctx, task, req.StudentAnswer)
+	check, err := s.ai.CheckAnswer(ctx, task, req.StudentAnswer)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	if err := s.repo.SaveAttempt(ctx, req.UserID, task.ID, task.Mode, req.StudentAnswer, check.IsCorrect, check); err != nil {
+		return CheckResult{}, err
+	}
+	if err := s.repo.UpdateProgress(ctx, req.UserID, task, check.IsCorrect); err != nil {
+		return CheckResult{}, err
+	}
+	return check, nil
 }
 
 func (s *Service) Hint(ctx context.Context, userID, taskID int64) (HintResult, error) {

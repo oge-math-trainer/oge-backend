@@ -35,6 +35,10 @@ type diagnosticSubmitRequest struct {
 	Answers   []diagnostic.AnswerInput `json:"answers"`
 }
 
+type diagnosticSessionRequest struct {
+	SessionID int64 `json:"session_id"`
+}
+
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if s.health == nil {
 		writeError(w, r, app.DBUnavailable(nil))
@@ -112,8 +116,8 @@ func (s *Server) handleDiagnosticStart(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, http.StatusOK, result)
 }
 
-func (s *Server) handleDiagnosticSubmit(w http.ResponseWriter, r *http.Request) {
-	var req diagnosticSubmitRequest
+func (s *Server) handleDiagnosticNext(w http.ResponseWriter, r *http.Request) {
+	var req diagnosticSessionRequest
 	if err := decodeStrictJSON(w, r, &req); err != nil {
 		writeError(w, r, err)
 		return
@@ -122,8 +126,23 @@ func (s *Server) handleDiagnosticSubmit(w http.ResponseWriter, r *http.Request) 
 		writeError(w, r, err)
 		return
 	}
-	if len(req.Answers) == 0 {
-		writeError(w, r, app.Validation("answers не должен быть пустым"))
+
+	result, err := s.diag.Next(r.Context(), userIDFromContext(r.Context()), req.SessionID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	writeSuccess(w, http.StatusOK, result)
+}
+
+func (s *Server) handleDiagnosticSubmit(w http.ResponseWriter, r *http.Request) {
+	var req diagnosticSubmitRequest
+	if err := decodeStrictJSON(w, r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := validatePositiveID(req.SessionID, "session_id"); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	for _, answer := range req.Answers {

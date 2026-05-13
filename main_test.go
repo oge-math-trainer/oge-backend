@@ -44,8 +44,8 @@ func TestGenerateTask(t *testing.T) {
 	}
 
 	target := tasks.Target{
-		OgeNumber:   11,
-		SubtypeCode: "graphs_linear",
+		OgeNumber:   4,
+		SubtypeCode: "linear_equation",
 	}
 
 	result, err := client.GenerateTask(context.Background(), target)
