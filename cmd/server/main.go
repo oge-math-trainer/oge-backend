@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt" // ← ДОБАВЛЕНО: нужен для отладочного вывода
 	"log"
 	"net/http"
 	"os/signal"
@@ -33,7 +32,7 @@ func main() {
 
 		for _, path := range paths {
 			if err := godotenv.Load(path); err == nil {
-				log.Printf("✅ Loaded .env from: %s", path)
+				log.Printf("Loaded .env from: %s", path)
 				break
 			}
 		}
@@ -57,12 +56,11 @@ func main() {
 
 	aiClient := ai.NewClient(cfg.AITunnelBaseURL, cfg.AITunnelAPIKey, cfg.AITunnelModel)
 
-	// 🔍 ОТЛАДКА: что видит сервер?
-	fmt.Println("🔍 DEBUG: AITunnelAPIKey length:", len(cfg.AITunnelAPIKey))
+	log.Printf("DEBUG: AITunnelAPIKey length: %d", len(cfg.AITunnelAPIKey))
 	if aiClient.IsConfigured() {
-		fmt.Println("✅ AI CLIENT: Configured (key is present)")
+		log.Print("AI CLIENT: configured (key is present)")
 	} else {
-		fmt.Println("❌ AI CLIENT: NOT configured (key is missing or empty)")
+		log.Print("AI CLIENT: not configured (key is missing or empty)")
 	}
 
 	authService := auth.NewService(store, cfg.AuthSecret, cfg.TokenTTL)

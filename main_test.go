@@ -12,15 +12,7 @@ import (
 )
 
 func TestChat(t *testing.T) {
-	godotenv.Load(".env")
-	if os.Getenv("AITUNNEL_API_KEY") == "" {
-		t.Skip("AITUNNEL_API_KEY is not set; skipping external AI integration test")
-	}
-
-	client, err := ai.NewClient()
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := requireAIClient(t)
 
 	result, err := client.Chat(
 		"Respond ONLY with valid JSON. No markdown. Return: {\"topic\": \"string\", \"task_number\": 0, \"condition\": \"string\", \"answer\": \"string\", \"hint1\": \"string\", \"explanation\": \"string\"}. All text in Russian.",
@@ -36,12 +28,7 @@ func TestChat(t *testing.T) {
 }
 
 func TestGenerateTask(t *testing.T) {
-	godotenv.Load(".env")
-
-	client, err := ai.NewClient()
-	if err != nil {
-		t.Fatal(err)
-	}
+	client := requireAIClient(t)
 
 	target := tasks.Target{
 		OgeNumber:   4,
@@ -60,8 +47,7 @@ func TestGenerateTask(t *testing.T) {
 }
 
 func TestHint(t *testing.T) {
-	godotenv.Load(".env")
-	client, _ := ai.NewClient()
+	client := requireAIClient(t)
 
 	task := tasks.Task{
 		Question:      "Решите уравнение 3(x - 4) + 2x = 7x - 10.",
@@ -76,8 +62,7 @@ func TestHint(t *testing.T) {
 }
 
 func TestExplain(t *testing.T) {
-	godotenv.Load(".env")
-	client, _ := ai.NewClient()
+	client := requireAIClient(t)
 
 	task := tasks.Task{
 		Question:      "Решите уравнение 3(x - 4) + 2x = 7x - 10.",
@@ -90,4 +75,19 @@ func TestExplain(t *testing.T) {
 	}
 	fmt.Println("Explanation:", result.Explanation)
 	fmt.Println("Steps:", result.Steps)
+}
+
+func requireAIClient(t *testing.T) *ai.Client {
+	t.Helper()
+
+	_ = godotenv.Load(".env")
+	if os.Getenv("AITUNNEL_API_KEY") == "" {
+		t.Skip("AITUNNEL_API_KEY is not set; skipping external AI integration test")
+	}
+
+	client, err := ai.NewClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
 }

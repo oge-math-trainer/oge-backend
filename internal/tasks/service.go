@@ -3,6 +3,8 @@ package tasks
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -38,6 +40,8 @@ type GraphTaskParams struct {
 	Graphs []GraphInfo `json:"graphs,omitempty"`
 }
 
+type VisualData map[string]any
+
 type Task struct {
 	ID              int64            `json:"id"`
 	UserID          int64            `json:"-"`
@@ -53,6 +57,7 @@ type Task struct {
 	ValidationNotes string           `json:"-"`
 	Source          string           `json:"source"`
 	CreatedAt       time.Time        `json:"created_at,omitempty"`
+	VisualData      VisualData       `json:"visual_data,omitempty"`
 	GraphData       *GraphTaskParams `json:"graphs,omitempty"` // ← Фронтенд ждёт "graphs"
 }
 
@@ -63,6 +68,7 @@ type GeneratedContent struct {
 	SelfCheck       string      `json:"self_check"`
 	IsValid         bool        `json:"is_valid"`
 	ValidationNotes string      `json:"validation_notes"`
+	VisualData      VisualData  `json:"visual_data,omitempty"`
 	Graphs          []GraphInfo `json:"graphs,omitempty"`
 }
 
@@ -79,6 +85,7 @@ type CreateTask struct {
 	IsValid         bool
 	ValidationNotes string
 	Source          string
+	VisualData      VisualData
 	GraphData       *GraphTaskParams `json:"graph_data,omitempty"`
 }
 
@@ -153,24 +160,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		return Task{}, err
 	}
 
-	if s.ai == nil || !s.ai.IsConfigured() {
-		return Task{}, app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
-	}
-
-	content, err := s.ai.GenerateTask(ctx, target)
+	content, source, err := s.generateContent(ctx, target)
 	if err != nil {
-		return Task{}, app.AIUnavailable(err)
-	}
-	if !content.IsValid {
-		return Task{}, app.AIUnavailable(errors.New("ai returned invalid task"))
-	}
-
-	// Упаковываем графики от ИИ
-	var graphData *GraphTaskParams
-	if len(content.Graphs) > 0 {
-		graphData = &GraphTaskParams{
-			Graphs: content.Graphs,
-		}
+		return Task{}, err
 	}
 
 	return s.repo.CreateGeneratedTask(ctx, CreateTask{
@@ -185,9 +177,84 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		SelfCheck:       strings.TrimSpace(content.SelfCheck),
 		IsValid:         content.IsValid,
 		ValidationNotes: strings.TrimSpace(content.ValidationNotes),
-		Source:          "qwen",
-		GraphData:       graphData,
+		Source:          source,
+		VisualData:      content.VisualData,
 	})
+}
+
+func (s *Service) generateContent(ctx context.Context, target Target) (GeneratedContent, string, error) {
+	if s.ai == nil || !s.ai.IsConfigured() {
+		if RequiresVisualData(target) {
+			err := errors.New("AI client is not configured")
+			log.Printf("ai generation fallback: oge_number=%d subtype_code=%s reason=%v", target.OgeNumber, target.SubtypeCode, err)
+			return FallbackGeneratedContent(target, err), "fallback", nil
+		}
+		return GeneratedContent{}, "", app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
+	}
+
+	var lastErr error
+	const maxAttempts = 2
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		started := time.Now()
+		content, err := s.ai.GenerateTask(ctx, target)
+		duration := time.Since(started)
+		if err != nil {
+			lastErr = err
+			log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=error error=%v",
+				target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds(), err)
+			continue
+		}
+
+		if err := validateGeneratedContent(target, &content); err != nil {
+			lastErr = err
+			log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=error error=%v",
+				target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds(), err)
+			continue
+		}
+
+		log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=success",
+			target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds())
+		return content, "qwen", nil
+	}
+
+	if RequiresVisualData(target) {
+		log.Printf("ai generation fallback: oge_number=%d subtype_code=%s reason=%v", target.OgeNumber, target.SubtypeCode, lastErr)
+		return FallbackGeneratedContent(target, lastErr), "fallback", nil
+	}
+
+	if lastErr == nil {
+		lastErr = errors.New("ai returned no generated content")
+	}
+	return GeneratedContent{}, "", app.AIUnavailable(lastErr)
+}
+
+func validateGeneratedContent(target Target, content *GeneratedContent) error {
+	if content == nil {
+		return errors.New("AI returned empty content")
+	}
+	if strings.TrimSpace(content.Question) == "" {
+		return errors.New("AI returned empty question")
+	}
+	if strings.TrimSpace(content.CorrectAnswer) == "" {
+		return errors.New("AI returned empty correct_answer")
+	}
+	if len(content.SolutionSteps) < 3 {
+		return fmt.Errorf("AI returned too few solution_steps: got %d, need at least 3", len(content.SolutionSteps))
+	}
+	if !content.IsValid {
+		return errors.New("AI returned is_valid=false")
+	}
+	if !RequiresVisualData(target) {
+		content.VisualData = nil
+		return nil
+	}
+
+	visualData, err := NormalizeAndValidateVisualData(target, content)
+	if err != nil {
+		return err
+	}
+	content.VisualData = visualData
+	return nil
 }
 
 func (s *Service) Check(ctx context.Context, req CheckRequest) (CheckResult, error) {

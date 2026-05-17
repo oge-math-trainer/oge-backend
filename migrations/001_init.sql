@@ -85,11 +85,13 @@ CREATE TABLE IF NOT EXISTS generated_tasks (
     self_check TEXT,
     is_valid BOOLEAN NOT NULL DEFAULT false,
     validation_notes TEXT,
+    visual_data JSONB,
     generation_source TEXT NOT NULL DEFAULT 'qwen',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT generated_tasks_mode_chk CHECK (mode IN ('weak', 'all', 'custom', 'diagnostic')),
     CONSTRAINT generated_tasks_oge_number_chk CHECK (oge_number BETWEEN 6 AND 19),
-    CONSTRAINT generated_tasks_subtype_code_not_empty_chk CHECK (length(trim(subtype_code)) > 0)
+    CONSTRAINT generated_tasks_subtype_code_not_empty_chk CHECK (length(trim(subtype_code)) > 0),
+    CONSTRAINT generated_tasks_visual_data_object_chk CHECK (visual_data IS NULL OR jsonb_typeof(visual_data) = 'object')
 );
 
 CREATE INDEX IF NOT EXISTS generated_tasks_user_id_idx

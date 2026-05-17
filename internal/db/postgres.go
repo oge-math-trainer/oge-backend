@@ -153,6 +153,14 @@ func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) 
 	if err != nil {
 		return tasks.Task{}, app.Internal(err)
 	}
+	var visualDataJSON json.RawMessage
+	if task.VisualData != nil {
+		b, err := json.Marshal(task.VisualData)
+		if err != nil {
+			return tasks.Task{}, app.Internal(err)
+		}
+		visualDataJSON = json.RawMessage(b)
+	}
 
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO generated_tasks (
@@ -167,14 +175,16 @@ func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) 
 			self_check,
 			is_valid,
 			validation_notes,
-			generation_source
+			generation_source,
+			visual_data
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, user_id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 		          COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''),
-		          is_valid, COALESCE(validation_notes, ''), generation_source, created_at
+		          is_valid, COALESCE(validation_notes, ''), generation_source,
+		          COALESCE(visual_data, '{}'::jsonb), created_at
 	`, task.UserID, task.Mode, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, task.Question, task.CorrectAnswer,
-		string(steps), task.SelfCheck, task.IsValid, task.ValidationNotes, task.Source)
+		string(steps), task.SelfCheck, task.IsValid, task.ValidationNotes, task.Source, visualDataJSON)
 
 	return scanGeneratedTask(row)
 }
@@ -183,7 +193,8 @@ func (s *Store) GetGeneratedTaskForUser(ctx context.Context, userID, id int64) (
 	row := s.pool.QueryRow(ctx, `
 		SELECT id, user_id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 		       COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''),
-		       is_valid, COALESCE(validation_notes, ''), generation_source, created_at
+		       is_valid, COALESCE(validation_notes, ''), generation_source,
+		       COALESCE(visual_data, '{}'::jsonb), created_at
 		FROM generated_tasks
 		WHERE id = $1 AND user_id = $2
 	`, id, userID)
@@ -365,7 +376,7 @@ func (s *Store) GetTasksBySession(ctx context.Context, sessionID int64) ([]tasks
 		SELECT gt.id, gt.user_id, gt.mode, gt.task_type_id, gt.oge_number, gt.subtype_code, 
 		       gt.question, gt.correct_answer, COALESCE(gt.solution_steps, '[]'::jsonb), 
 		       COALESCE(gt.self_check, ''), gt.is_valid, COALESCE(gt.validation_notes, ''), 
-		       gt.generation_source, gt.created_at
+		       gt.generation_source, COALESCE(gt.visual_data, '{}'::jsonb), gt.created_at
 		FROM diagnostic_session_tasks dst
 		JOIN generated_tasks gt ON dst.generated_task_id = gt.id
 		WHERE dst.session_id = $1
@@ -396,7 +407,7 @@ func (s *Store) GetTaskBySession(ctx context.Context, sessionID, taskID int64) (
 		SELECT gt.id, gt.user_id, gt.mode, gt.task_type_id, gt.oge_number, gt.subtype_code, 
 		       gt.question, gt.correct_answer, COALESCE(gt.solution_steps, '[]'::jsonb), 
 		       COALESCE(gt.self_check, ''), gt.is_valid, COALESCE(gt.validation_notes, ''), 
-		       gt.generation_source, gt.created_at
+		       gt.generation_source, COALESCE(gt.visual_data, '{}'::jsonb), gt.created_at
 		FROM diagnostic_session_tasks dst
 		JOIN generated_tasks gt ON dst.generated_task_id = gt.id
 		WHERE dst.session_id = $1
@@ -524,6 +535,7 @@ func collectTargets(rows pgx.Rows) ([]tasks.Target, error) {
 func scanGeneratedTask(row pgx.Row) (tasks.Task, error) {
 	var task tasks.Task
 	var stepsJSON []byte
+	var visualDataJSON []byte
 	var taskTypeID sql.NullInt64
 	if err := row.Scan(
 		&task.ID,
@@ -539,6 +551,7 @@ func scanGeneratedTask(row pgx.Row) (tasks.Task, error) {
 		&task.IsValid,
 		&task.ValidationNotes,
 		&task.Source,
+		&visualDataJSON,
 		&task.CreatedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -548,6 +561,13 @@ func scanGeneratedTask(row pgx.Row) (tasks.Task, error) {
 	}
 	if len(stepsJSON) > 0 {
 		_ = json.Unmarshal(stepsJSON, &task.SolutionSteps)
+	}
+	if len(visualDataJSON) > 0 && string(visualDataJSON) != "{}" && string(visualDataJSON) != "null" {
+		var visualData tasks.VisualData
+		if err := json.Unmarshal(visualDataJSON, &visualData); err != nil {
+			return tasks.Task{}, app.Internal(err)
+		}
+		task.VisualData = visualData
 	}
 	task.TaskTypeID = ptrFromNullInt64(taskTypeID)
 	return task, nil

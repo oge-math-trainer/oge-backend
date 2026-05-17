@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -15,6 +16,11 @@ import (
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
+)
+
+const (
+	defaultAIRequestTimeout  = 30 * time.Second
+	extendedAIRequestTimeout = 90 * time.Second
 )
 
 type Client struct {
@@ -26,12 +32,10 @@ type Client struct {
 
 func NewClient(baseURL, apiKey, model string) *Client {
 	return &Client{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  strings.TrimSpace(apiKey),
-		model:   strings.TrimSpace(model),
-		httpClient: &http.Client{
-			Timeout: 600 * time.Second,
-		},
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     strings.TrimSpace(apiKey),
+		model:      strings.TrimSpace(model),
+		httpClient: &http.Client{},
 	}
 }
 
@@ -41,6 +45,14 @@ func (c *Client) IsConfigured() bool {
 
 func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
 	var out tasks.GeneratedContent
+
+	timeout := defaultAIRequestTimeout
+	if tasks.RequiresExtendedAITimeout(target) {
+		timeout = extendedAIRequestTimeout
+	}
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// 🔧 Расширенный промпт с поддержкой графиков для №11
 	graphsRule := ""
@@ -64,6 +76,7 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 5. Верни ТОЛЬКО валидный JSON без markdown, без пояснений, начинай с { и заканчивай }:
 {"question":"текст","correct_answer":"число","solution_steps":["шаг 1"],"self_check":"проверка","is_valid":true,"validation_notes":"соответствует ОГЭ"}%s`,
 		target.OgeNumber, target.SubtypeCode, graphsRule)
+	prompt += visualDataPromptRule(target)
 
 	if err := c.completeJSON(ctx, prompt, &out); err != nil {
 		return tasks.GeneratedContent{}, err
@@ -72,18 +85,70 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 	// 🔧 Очищаем текст от знаков доллара (LaTeX) перед сохранением/возвратом
 	// 🔍 Логируем для отладки
 	if strings.Contains(out.Question, "$") {
-		fmt.Printf("🧹 CLEANING question: %q → %q\n", out.Question, cleanLaTeX(out.Question))
+		log.Printf("CLEANING question: %q -> %q", out.Question, cleanLaTeX(out.Question))
 	}
 	out.Question = cleanLaTeX(out.Question)
 
 	for i, step := range out.SolutionSteps {
 		if strings.Contains(step, "$") {
-			fmt.Printf("🧹 CLEANING step[%d]: %q → %q\n", i, step, cleanLaTeX(step))
+			log.Printf("CLEANING step[%d]: %q -> %q", i, step, cleanLaTeX(step))
 		}
 		out.SolutionSteps[i] = cleanLaTeX(step)
 	}
 
 	return out, nil
+}
+
+func visualDataPromptRule(target tasks.Target) string {
+	switch tasks.VisualKindForTarget(target) {
+	case tasks.VisualKindGraph:
+		return `
+
+VISUAL DATA RULE:
+Add "visual_data" as a JSON object. Do not wrap it in a string.
+Required schema:
+"visual_data": {
+  "type": "graph",
+  "x_axis": {"min": -10, "max": 10},
+  "y_axis": {"min": -10, "max": 10},
+  "graphs": [
+    {"id": "1", "label": "y = x", "points": [{"x": -2, "y": -2}, {"x": 0, "y": 0}, {"x": 2, "y": 2}]}
+  ]
+}
+Each graph must contain at least 3 coordinate points. All coordinates and axis bounds must be numbers.`
+	case tasks.VisualKindNumberLine:
+		return `
+
+VISUAL DATA RULE:
+Add "visual_data" as a JSON object. Do not wrap it in a string.
+Required schema:
+"visual_data": {
+  "type": "number_line",
+  "axis": {"min": -10, "max": 10},
+  "interval": {"start": -2, "end": 3, "start_closed": true, "end_closed": false},
+  "points": [{"value": -2, "closed": true, "label": "-2"}, {"value": 3, "closed": false, "label": "3"}]
+}
+The interval start must be strictly less than end. The *_closed and point closed fields must be booleans.`
+	case tasks.VisualKindGeometry:
+		return `
+
+VISUAL DATA RULE:
+Add "visual_data" as a JSON object. Do not wrap it in a string.
+Required schema:
+"visual_data": {
+  "type": "geometry",
+  "shape": "triangle",
+  "vertices": [{"label": "A", "x": 0, "y": 0}, {"label": "B", "x": 6, "y": 0}, {"label": "C", "x": 0, "y": 8}],
+  "labels": {"A": "A", "B": "B", "C": "C"},
+  "segments": [{"from": "A", "to": "B"}, {"from": "A", "to": "C"}, {"from": "B", "to": "C"}]
+}
+There must be at least 3 vertices. Every vertex must use exactly label, x, and y for its required keys. Labels must match vertices.`
+	default:
+		return `
+
+VISUAL DATA RULE:
+For this task type, omit "visual_data".`
+	}
 }
 
 func (c *Client) CheckAnswer(ctx context.Context, task tasks.Task, studentAnswer string) (tasks.CheckResult, error) {
@@ -155,6 +220,11 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 	if !c.IsConfigured() {
 		return app.AIUnavailable(errors.New("AITUNNEL_API_KEY is empty"))
 	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, defaultAIRequestTimeout)
+		defer cancel()
+	}
 
 	body := chatRequest{
 		Model: c.model,
@@ -199,7 +269,9 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 		return app.AIUnavailable(errors.New("ai service returned no choices"))
 	}
 
-	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+	rawContent := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+	debugLogf("ai raw response: %s", rawContent)
+	content := rawContent
 
 	// Чистим markdown блоки
 	content = strings.TrimPrefix(content, "```json")
@@ -220,27 +292,26 @@ func (c *Client) completeJSON(ctx context.Context, prompt string, out any) error
 	content = sanitizeAIResponse(content)
 
 	// 🔍 Логируем сырой ответ перед парсингом
-	fmt.Println("🔍 AI RAW RESPONSE (после очистки):", content)
+	debugLogf("ai cleaned response: %s", content)
 
 	if err := json.Unmarshal([]byte(content), out); err != nil {
 		// 🔍 Логируем конкретную ошибку парсинга
-		fmt.Printf("❌ JSON PARSE FAILED: %v\n", err)
-		fmt.Printf("❌ Raw content was: %.200s...\n", content)
+		log.Printf("ai json parse failed: err=%v raw_prefix=%.200s", err, content)
 		return app.AIUnavailable(fmt.Errorf("invalid ai json: %w", err))
 	}
 
 	// 🔍 Дополнительная валидация после парсинга
 	if gen, ok := out.(*tasks.GeneratedContent); ok {
 		if strings.TrimSpace(gen.Question) == "" {
-			fmt.Println("❌ VALIDATION: missing question")
+			log.Printf("ai validation failed: missing question")
 			return app.Validation("AI returned empty question")
 		}
 		if strings.TrimSpace(gen.CorrectAnswer) == "" {
-			fmt.Println("❌ VALIDATION: missing correct_answer")
+			log.Printf("ai validation failed: missing correct_answer")
 			return app.Validation("AI returned empty correct_answer")
 		}
 		if len(gen.SolutionSteps) < 3 {
-			fmt.Printf("❌ VALIDATION: solution_steps=%d (need >=3)\n", len(gen.SolutionSteps))
+			log.Printf("ai validation failed: solution_steps=%d need>=3", len(gen.SolutionSteps))
 			return app.Validation("AI returned too few solution steps")
 		}
 	}
@@ -263,6 +334,10 @@ type chatResponse struct {
 	Choices []struct {
 		Message chatMessage `json:"message"`
 	} `json:"choices"`
+}
+
+func debugLogf(format string, args ...any) {
+	log.Printf("DEBUG "+format, args...)
 }
 
 // sanitizeAIResponse очищает ответ AI от типичных LaTeX артефактов
