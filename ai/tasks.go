@@ -4,11 +4,87 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
+
+type exampleTask struct {
+	Question string `json:"question"`
+}
+
+type catalogEntry struct {
+	Title            string        `json:"title"`
+	Description      string        `json:"description"`
+	Example          string        `json:"example"`
+	Examples         []exampleTask `json:"examples"`
+	ForbiddenTopics  []string      `json:"forbidden_topics"`
+	RequiredKeywords []string      `json:"required_keywords"`
+}
+
+func loadCatalogEntry(ogeNumber int, subtypeCode string) catalogEntry {
+	data, err := os.ReadFile("tasks_catalog.json")
+	if err != nil {
+		fmt.Println("CATALOG ERROR:", err)
+		return catalogEntry{}
+	}
+	var catalog map[string]map[string]catalogEntry
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		fmt.Println("CATALOG PARSE ERROR:", err)
+		return catalogEntry{}
+	}
+	key := strconv.Itoa(ogeNumber)
+	if subtypes, ok := catalog[key]; ok {
+		if entry, ok := subtypes[subtypeCode]; ok {
+			return entry
+		}
+	}
+	fmt.Printf("CATALOG: entry not found for %d/%s\n", ogeNumber, subtypeCode)
+	return catalogEntry{}
+}
+
+func buildSubtypePrompt(entry catalogEntry) string {
+	if entry.Title == "" {
+		return ""
+	}
+
+	prompt := fmt.Sprintf(`
+
+TASK SUBTYPE REQUIREMENTS:
+Title: %s
+Description: %s
+`, entry.Title, entry.Description)
+
+	if len(entry.Examples) > 0 {
+		prompt += "\nHere are real OGE exam tasks on this topic — generate something similar in style and difficulty:\n"
+		for i, ex := range entry.Examples {
+			prompt += fmt.Sprintf("%d. %s\n", i+1, ex.Question)
+		}
+	} else if entry.Example != "" {
+		prompt += fmt.Sprintf("\nExample task: %s\n", entry.Example)
+	}
+
+	if len(entry.ForbiddenTopics) > 0 {
+		prompt += "\nFORBIDDEN TOPICS — never generate tasks about:\n"
+		for _, t := range entry.ForbiddenTopics {
+			prompt += "- " + t + "\n"
+		}
+	}
+
+	if len(entry.RequiredKeywords) > 0 {
+		prompt += "\nThe task MUST involve:\n"
+		for _, k := range entry.RequiredKeywords {
+			prompt += "- " + k + "\n"
+		}
+	}
+
+	prompt += "\nSTRICT: generate ONLY tasks matching this subtype. Do NOT generate tasks from other topics.\n"
+
+	return prompt
+}
 
 // sanitizeAIResponse очищает ответ AI от типичных LaTeX артефактов
 func sanitizeAIResponse(raw string) string {
@@ -99,101 +175,89 @@ func (c *Client) IsConfigured() bool {
 // GenerateTask генерирует задание ОГЭ по математике
 func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
 
-	systemPrompt := `You are an expert mathematics teacher for Russian OGE exam.
+	systemPrompt := `You are an expert mathematics teacher for Russian OGE exam preparation.
 
-Generate ONE math problem. 
+Generate exactly ONE OGE math problem.
 
-Respond ONLY with valid JSON, nothing else. No explanations, no markdown, no code blocks.
+Respond ONLY with valid JSON.
+No markdown.
+No explanations.
+No code blocks.
+No text before or after JSON.
+
+JSON format:
 
 {
-  "question": "Текст задачи на русском языке",
-  "correct_answer": "только цифры, минус и запятая",
-  "solution_steps": ["шаг 1", "шаг 2", "шаг 3"],
-  "self_check": "как проверить ответ",
+  "question": "problem text in Russian",
+  "correct_answer": "answer",
+  "solution_steps": ["step 1", "step 2", "step 3"],
+  "self_check": "how to verify the answer",
   "is_valid": true,
   "validation_notes": ""
 }
 
-СТРОГО ЗАПРЕЩЕНО:
-- Использовать любой LaTeX: \( \), \[ \], \begin, \end, \\(
-- Использовать двойные бэкслеши \\
-- Использовать \frac, \sqrt, \begin{cases} и любые другие LaTeX команды
-- Использовать символы $ для математики
+Rules:
+- All text must be in Russian.
+- Problem must match real OGE difficulty and subtype.
+- solution_steps: 3 to 7 steps.
+- Use plain text math only.
+- Never use LaTeX.
+- Never use backslashes.
+- Never use markdown formatting.
+- Mathematical expressions must look like:
+  "x^2 + 3x - 5 = 0"
+  "2x + y = 7"
+  "3/4"
 
-Для записи формул используй ТОЛЬКО простой текст:
-Правильно: "x^2 + 3x - 5 = 0" или "2x + y = 5"
-Неправильно: anything with \( or \begin
+Forbidden:
+\(
+\)
+\[
+\]
+$$
+\frac
+\sqrt
+\begin
+\end
 
-All text must be in Russian.
-correct_answer — только цифры, запятая и минус, без пробелов.
-Do not add any extra text outside JSON.
+FOR OGE NUMBER 11:
+- Add field "graphs".
+- graphs must contain 1 to 4 graph objects.
 
-    // ... остальной код без изменений
-
-For oge_number 11:
-correct_answer may contain graph matching notation like:
-"1-A,2-B"
-or inequalities like:
-"a>0,b<0"
-
-  if oge_number is 11, you MUST add a "graphs" field to the JSON.
-
-"graphs" is an array of 1 to 4 objects depending on the task type.
-
-Each graph object must contain:
+Graph object format:
 
 {
-	"id": "1",
-	"type": "linear" | "quadratic" | "hyperbola",
-	"coefficients": [numbers],
-	"x_min": -10,
-	"x_max": 10,
-	"y_min": -10,
-	"y_max": 10
+  "id": "1",
+  "type": "linear",
+  "coefficients": [2, 1],
+  "x_min": -10,
+  "x_max": 10,
+  "y_min": -10,
+  "y_max": 10
 }
 
-Rules for graph types:
-* linear:
-  y = ax + b
-  coefficients format: [a, b]
-* quadratic:
-  y = ax^2 + bx + c
-  coefficients format: [a, b, c]
-* hyperbola:
-  y = k / x
-  coefficients format: [k]
-Rules:
+Graph rules:
+- linear => [a, b] for y = ax + b
+- quadratic => [a, b, c] for y = ax^2 + bx + c
+- hyperbola => [k] for y = k/x
 - coefficients must contain only numbers
-- all ranges must be integers
-- do NOT include formula strings
-- do NOT include LaTeX
-- graphs must be mathematically correct
+- ranges must be integers
+- do not include formula strings
 
-If the task requires matching graphs to formulas, "correct_answer" must be like "1-A,2-B,3-C".
+For graph matching tasks:
+correct_answer may be:
+"1-A,2-B,3-C"
 
-For all other oge_number values, do NOT include the "graphs" field.
+For coefficient sign tasks:
+correct_answer may be:
+"a>0,b<0"
 
-IMPORTANT JSON RULES:
-CRITICAL RULE FOR FRACTIONS:
-- Use only plain text: 1/2, 3/4, 5/2, a/b
-- NEVER use \frac{}, \\frac{}, or any LaTeX commands
-- Do not use backslashes at all in mathematical expressions
-IMPORTANT:
-- Do NOT use any LaTeX at all.
-- Do NOT use backslashes before ( ) [ ] or letters.
-- Output clean JSON only.
-NEVER use LaTeX delimiters: \( \), \[ \], $$ $$
-NEVER use backslashes in mathematical expressions
-NEVER escape parentheses
-Use only plain UTF-8 text
-Example correct: "x^2 + 2x - 3 = 0"
-Example wrong: "(x^2 + 2x - 3 = 0)"
-FINAL STRICT RULE:
-You MUST NOT use any of these: \(  \)  \[  \]  \\(  \\)  \\[  \\]  \begin  \end
-All math expressions must be written in plain text only, for example: 
-"x + y = 5" or "2x - y = 1" or "x = 2"
-Never wrap math in any LaTeX delimiters.
+For all other tasks:
+Do NOT include "graphs".
 `
+
+	entry := loadCatalogEntry(target.OgeNumber, target.SubtypeCode)
+	systemPrompt += buildSubtypePrompt(entry)
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
