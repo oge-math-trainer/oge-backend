@@ -4,11 +4,87 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
+
+type exampleTask struct {
+	Question string `json:"question"`
+}
+
+type catalogEntry struct {
+	Title            string        `json:"title"`
+	Description      string        `json:"description"`
+	Example          string        `json:"example"`
+	Examples         []exampleTask `json:"examples"`
+	ForbiddenTopics  []string      `json:"forbidden_topics"`
+	RequiredKeywords []string      `json:"required_keywords"`
+}
+
+func loadCatalogEntry(ogeNumber int, subtypeCode string) catalogEntry {
+	data, err := os.ReadFile("tasks_catalog.json")
+	if err != nil {
+		fmt.Println("CATALOG ERROR:", err)
+		return catalogEntry{}
+	}
+	var catalog map[string]map[string]catalogEntry
+	if err := json.Unmarshal(data, &catalog); err != nil {
+		fmt.Println("CATALOG PARSE ERROR:", err)
+		return catalogEntry{}
+	}
+	key := strconv.Itoa(ogeNumber)
+	if subtypes, ok := catalog[key]; ok {
+		if entry, ok := subtypes[subtypeCode]; ok {
+			return entry
+		}
+	}
+	fmt.Printf("CATALOG: entry not found for %d/%s\n", ogeNumber, subtypeCode)
+	return catalogEntry{}
+}
+
+func buildSubtypePrompt(entry catalogEntry) string {
+	if entry.Title == "" {
+		return ""
+	}
+
+	prompt := fmt.Sprintf(`
+
+TASK SUBTYPE REQUIREMENTS:
+Title: %s
+Description: %s
+`, entry.Title, entry.Description)
+
+	if len(entry.Examples) > 0 {
+		prompt += "\nHere are real OGE exam tasks on this topic — generate something similar in style and difficulty:\n"
+		for i, ex := range entry.Examples {
+			prompt += fmt.Sprintf("%d. %s\n", i+1, ex.Question)
+		}
+	} else if entry.Example != "" {
+		prompt += fmt.Sprintf("\nExample task: %s\n", entry.Example)
+	}
+
+	if len(entry.ForbiddenTopics) > 0 {
+		prompt += "\nFORBIDDEN TOPICS — never generate tasks about:\n"
+		for _, t := range entry.ForbiddenTopics {
+			prompt += "- " + t + "\n"
+		}
+	}
+
+	if len(entry.RequiredKeywords) > 0 {
+		prompt += "\nThe task MUST involve:\n"
+		for _, k := range entry.RequiredKeywords {
+			prompt += "- " + k + "\n"
+		}
+	}
+
+	prompt += "\nSTRICT: generate ONLY tasks matching this subtype. Do NOT generate tasks from other topics.\n"
+
+	return prompt
+}
 
 // sanitizeAIResponse очищает ответ AI от типичных LaTeX артефактов
 func sanitizeAIResponse(raw string) string {
@@ -179,6 +255,9 @@ correct_answer may be:
 For all other tasks:
 Do NOT include "graphs".
 `
+
+	entry := loadCatalogEntry(target.OgeNumber, target.SubtypeCode)
+	systemPrompt += buildSubtypePrompt(entry)
 
 	type generateInput struct {
 		OgeNumber   int    `json:"oge_number"`
