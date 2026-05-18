@@ -5,12 +5,12 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	"github.com/joho/godotenv"
-	"github.com/oge-math-trainer/oge-backend.git/internal/ai"
+	"github.com/oge-math-trainer/oge-backend.git/ai"
 	"github.com/oge-math-trainer/oge-backend.git/internal/api"
 	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
 	"github.com/oge-math-trainer/oge-backend.git/internal/config"
@@ -21,26 +21,17 @@ import (
 )
 
 func main() {
-	if err := godotenv.Load(); err != nil {
-		// Пробуем разные возможные пути
-		paths := []string{
-			"../../../.env", // из cmd/server
-			"../../.env",    // из cmd/
-			"../.env",       // из oge-backend/
-			".env",          // текущая папка
-		}
-
-		for _, path := range paths {
-			if err := godotenv.Load(path); err == nil {
-				log.Printf("Loaded .env from: %s", path)
-				break
-			}
-		}
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(".env")
+	envPath := findDotEnvPath()
+	if envPath != "" {
+		log.Printf("Loaded .env from: %s", envPath)
+	} else {
+		log.Print("No .env file found; using process environment")
+	}
+
+	cfg, err := config.Load(envPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -54,7 +45,7 @@ func main() {
 	}
 	defer store.Close()
 
-	aiClient := ai.NewClient(cfg.AITunnelBaseURL, cfg.AITunnelAPIKey, cfg.AITunnelModel)
+	aiClient := ai.NewConfiguredClient(cfg.AITunnelBaseURL, cfg.AITunnelAPIKey, cfg.AITunnelModel)
 
 	log.Printf("DEBUG: AITunnelAPIKey length: %d", len(cfg.AITunnelAPIKey))
 	if aiClient.IsConfigured() {
@@ -109,4 +100,14 @@ func main() {
 			log.Fatal(err)
 		}
 	}
+}
+
+func findDotEnvPath() string {
+	for _, path := range []string{".env", "../.env", "../../.env", "../../../.env"} {
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }

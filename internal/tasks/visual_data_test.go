@@ -62,3 +62,30 @@ func TestValidateGeometryRejectsLabelMismatch(t *testing.T) {
 		t.Fatal("expected geometry validation error")
 	}
 }
+
+func TestValidateGridVisualData(t *testing.T) {
+	data := VisualData{
+		"type":   string(VisualKindGrid),
+		"width":  8,
+		"height": 6,
+		"points": []any{
+			map[string]any{"label": "A", "x": 1, "y": 1},
+			map[string]any{"label": "B", "x": 4, "y": 5},
+		},
+		"segments": []any{
+			map[string]any{"from": "A", "to": "B"},
+		},
+	}
+
+	if err := ValidateVisualData(Target{OgeNumber: 18, SubtypeCode: "grid_distance"}, data); err != nil {
+		t.Fatalf("expected valid grid visual_data: %v", err)
+	}
+}
+
+func TestOge19DoesNotRequireVisualData(t *testing.T) {
+	target := Target{OgeNumber: 19, SubtypeCode: "logic_angles"}
+
+	if RequiresVisualData(target) {
+		t.Fatal("expected OGE 19 to work without visual_data")
+	}
+}

@@ -45,6 +45,8 @@ type Client struct {
 	httpClient *http.Client
 }
 
+const defaultModel = "qwen/qwen3-235b-a22b-2507"
+
 // NewClient создаёт нового AI-клиента из переменных окружения
 func NewClient() (*Client, error) {
 	apiKey := os.Getenv("AITUNNEL_API_KEY")
@@ -60,11 +62,31 @@ func NewClient() (*Client, error) {
 	return &Client{
 		apiKey:  apiKey,
 		baseURL: baseURL,
-		model:   "qwen/qwen3-235b-a22b-2507", // меняй при необходимости
+		model:   envOrDefault("AITUNNEL_MODEL", defaultModel),
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}, nil
+}
+
+func NewConfiguredClient(baseURL, apiKey, model string) *Client {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" {
+		baseURL = "https://api.aitunnel.ru/v1"
+	}
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = defaultModel
+	}
+
+	return &Client{
+		apiKey:  strings.TrimSpace(apiKey),
+		baseURL: baseURL,
+		model:   model,
+		httpClient: &http.Client{
+			Timeout: 600 * time.Second,
+		},
+	}
 }
 
 // Chat отправляет запрос к AI и возвращает текст ответа
@@ -139,4 +161,12 @@ func (c *Client) Chat(systemPrompt string, userMessage string, maxTokens int, te
 	content = strings.TrimSpace(content)
 
 	return content, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	return value
 }

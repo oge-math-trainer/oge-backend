@@ -13,6 +13,7 @@ const (
 	VisualKindGraph      VisualKind = "graph"
 	VisualKindNumberLine VisualKind = "number_line"
 	VisualKindGeometry   VisualKind = "geometry"
+	VisualKindGrid       VisualKind = "grid"
 )
 
 func VisualKindForTarget(target Target) VisualKind {
@@ -22,6 +23,8 @@ func VisualKindForTarget(target Target) VisualKind {
 		return VisualKindGraph
 	case target.OgeNumber == 7 || strings.Contains(subtype, "numberline") || strings.HasPrefix(subtype, "ineq_") || strings.Contains(subtype, "inequal"):
 		return VisualKindNumberLine
+	case target.OgeNumber == 18 || strings.HasPrefix(subtype, "grid_"):
+		return VisualKindGrid
 	case IsGeometryTarget(target):
 		return VisualKindGeometry
 	default:
@@ -39,10 +42,10 @@ func RequiresExtendedAITimeout(target Target) bool {
 
 func IsGeometryTarget(target Target) bool {
 	subtype := strings.ToLower(strings.TrimSpace(target.SubtypeCode))
-	if target.OgeNumber >= 15 && target.OgeNumber <= 19 {
+	if target.OgeNumber >= 15 && target.OgeNumber <= 17 {
 		return true
 	}
-	for _, prefix := range []string{"triangles_", "circle_", "quad_", "grid_", "logic_"} {
+	for _, prefix := range []string{"triangles_", "circle_", "quad_"} {
 		if strings.HasPrefix(subtype, prefix) {
 			return true
 		}
@@ -95,6 +98,8 @@ func ValidateVisualData(target Target, data VisualData) error {
 		return validateNumberLineVisualData(data)
 	case VisualKindGeometry:
 		return validateGeometryVisualData(data)
+	case VisualKindGrid:
+		return validateGridVisualData(data)
 	default:
 		return fmt.Errorf("unsupported visual_data.type %q", gotType)
 	}
@@ -137,6 +142,16 @@ func FallbackGeneratedContent(target Target, reason error) GeneratedContent {
 			ValidationNotes: note,
 			VisualData:      FallbackVisualData(target),
 		}
+	case VisualKindGrid:
+		return GeneratedContent{
+			Question:        "На клетчатой бумаге отмечены точки A(1; 1) и B(4; 5). Найдите длину отрезка AB, если сторона клетки равна 1.",
+			CorrectAnswer:   "5",
+			SolutionSteps:   []string{"По горизонтали точки отличаются на 3 клетки.", "По вертикали точки отличаются на 4 клетки.", "По теореме Пифагора AB = sqrt(3^2 + 4^2) = 5."},
+			SelfCheck:       "Тройки 3, 4, 5 дают длину 5.",
+			IsValid:         true,
+			ValidationNotes: note,
+			VisualData:      FallbackVisualData(target),
+		}
 	default:
 		return GeneratedContent{
 			Question:        "Решите уравнение x + 2 = 5.",
@@ -175,6 +190,105 @@ func FallbackVisualData(target Target) VisualData {
 			},
 		}
 	case VisualKindGeometry:
+		return fallbackGeometryVisualData(target)
+	case VisualKindGrid:
+		return VisualData{
+			"type":   string(VisualKindGrid),
+			"width":  8,
+			"height": 6,
+			"points": []any{
+				map[string]any{"label": "A", "x": 1, "y": 1},
+				map[string]any{"label": "B", "x": 4, "y": 5},
+			},
+			"segments": []any{
+				map[string]any{"from": "A", "to": "B"},
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func fallbackGeometryVisualData(target Target) VisualData {
+	subtype := strings.ToLower(strings.TrimSpace(target.SubtypeCode))
+	switch {
+	case target.OgeNumber == 16 && strings.Contains(subtype, "tangent"):
+		return VisualData{
+			"type":  string(VisualKindGeometry),
+			"shape": "circle_tangent",
+			"vertices": []any{
+				vertex("A", -4, 0),
+				vertex("O", 0, 0),
+				vertex("B", -1.8, 2.4),
+				vertex("C", -1.8, -2.4),
+			},
+			"labels": map[string]any{"A": "A", "O": "O", "B": "B", "C": "C"},
+			"circles": []any{
+				map[string]any{"center": "O", "through": "B"},
+			},
+			"segments": []any{
+				map[string]any{"from": "A", "to": "B", "label": "касательная"},
+				map[string]any{"from": "A", "to": "C", "label": "касательная"},
+				map[string]any{"from": "O", "to": "B", "label": "r"},
+				map[string]any{"from": "O", "to": "C", "label": "r"},
+				map[string]any{"from": "A", "to": "O", "style": "dashed"},
+			},
+		}
+	case target.OgeNumber == 16:
+		return VisualData{
+			"type":  string(VisualKindGeometry),
+			"shape": "circle",
+			"vertices": []any{
+				vertex("O", 0, 0),
+				vertex("A", 3, 0),
+				vertex("B", -2.2, 2),
+			},
+			"labels": map[string]any{"O": "O", "A": "A", "B": "B"},
+			"circles": []any{
+				map[string]any{"center": "O", "through": "A"},
+			},
+			"segments": []any{
+				map[string]any{"from": "O", "to": "A", "label": "r"},
+				map[string]any{"from": "A", "to": "B", "label": "хорда"},
+			},
+		}
+	case target.OgeNumber == 17 && strings.Contains(subtype, "trapezoid"):
+		return VisualData{
+			"type":  string(VisualKindGeometry),
+			"shape": "trapezoid",
+			"vertices": []any{
+				vertex("A", 0, 0),
+				vertex("B", 8, 0),
+				vertex("C", 6, 3),
+				vertex("D", 2, 3),
+			},
+			"labels": map[string]any{"A": "A", "B": "B", "C": "C", "D": "D"},
+			"segments": []any{
+				map[string]any{"from": "A", "to": "B"},
+				map[string]any{"from": "B", "to": "C"},
+				map[string]any{"from": "C", "to": "D"},
+				map[string]any{"from": "D", "to": "A"},
+			},
+		}
+	case target.OgeNumber == 17:
+		return VisualData{
+			"type":  string(VisualKindGeometry),
+			"shape": "rectangle",
+			"vertices": []any{
+				vertex("A", 0, 0),
+				vertex("B", 6, 0),
+				vertex("C", 6, 4),
+				vertex("D", 0, 4),
+			},
+			"labels": map[string]any{"A": "A", "B": "B", "C": "C", "D": "D"},
+			"segments": []any{
+				map[string]any{"from": "A", "to": "B"},
+				map[string]any{"from": "B", "to": "C"},
+				map[string]any{"from": "C", "to": "D"},
+				map[string]any{"from": "D", "to": "A"},
+			},
+		}
+	default:
 		return VisualData{
 			"type":     string(VisualKindGeometry),
 			"shape":    "triangle",
@@ -186,8 +300,6 @@ func FallbackVisualData(target Target) VisualData {
 				map[string]any{"from": "B", "to": "C"},
 			},
 		}
-	default:
-		return nil
 	}
 }
 
@@ -367,6 +479,101 @@ func validateGeometryVisualData(data VisualData) error {
 			}
 			if _, ok := vertexLabels[to]; !ok {
 				return fmt.Errorf("visual_data.segments[%d].to references unknown vertex %q", i, to)
+			}
+		}
+	}
+
+	return nil
+}
+
+func validateGridVisualData(data VisualData) error {
+	width, err := numberFromMap(data, "width", "visual_data.width")
+	if err != nil {
+		return err
+	}
+	height, err := numberFromMap(data, "height", "visual_data.height")
+	if err != nil {
+		return err
+	}
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("visual_data.width and visual_data.height must be positive")
+	}
+
+	points, err := arrayFromValue(data["points"], "visual_data.points")
+	if err != nil {
+		return err
+	}
+	if len(points) < 2 {
+		return fmt.Errorf("visual_data.points must contain at least 2 points")
+	}
+
+	pointLabels := make(map[string]struct{}, len(points))
+	for i, rawPoint := range points {
+		pointObj, err := objectFromValue(rawPoint, fmt.Sprintf("visual_data.points[%d]", i))
+		if err != nil {
+			return err
+		}
+		label, err := stringFromMap(pointObj, "label", fmt.Sprintf("visual_data.points[%d].label", i))
+		if err != nil {
+			return err
+		}
+		if _, exists := pointLabels[label]; exists {
+			return fmt.Errorf("visual_data.points[%d].label duplicates point %q", i, label)
+		}
+		pointLabels[label] = struct{}{}
+		x, err := numberFromMap(pointObj, "x", fmt.Sprintf("visual_data.points[%d].x", i))
+		if err != nil {
+			return err
+		}
+		y, err := numberFromMap(pointObj, "y", fmt.Sprintf("visual_data.points[%d].y", i))
+		if err != nil {
+			return err
+		}
+		if x < 0 || x > width || y < 0 || y > height {
+			return fmt.Errorf("visual_data.points[%d] must be inside the grid", i)
+		}
+	}
+
+	segments, err := arrayFromValue(data["segments"], "visual_data.segments")
+	if err != nil {
+		return err
+	}
+	if len(segments) == 0 {
+		return fmt.Errorf("visual_data.segments must contain at least one segment")
+	}
+	for i, rawSegment := range segments {
+		segment, err := objectFromValue(rawSegment, fmt.Sprintf("visual_data.segments[%d]", i))
+		if err != nil {
+			return err
+		}
+		from, err := stringFromMap(segment, "from", fmt.Sprintf("visual_data.segments[%d].from", i))
+		if err != nil {
+			return err
+		}
+		to, err := stringFromMap(segment, "to", fmt.Sprintf("visual_data.segments[%d].to", i))
+		if err != nil {
+			return err
+		}
+		if _, ok := pointLabels[from]; !ok {
+			return fmt.Errorf("visual_data.segments[%d].from references unknown point %q", i, from)
+		}
+		if _, ok := pointLabels[to]; !ok {
+			return fmt.Errorf("visual_data.segments[%d].to references unknown point %q", i, to)
+		}
+	}
+
+	if rawFill, ok := data["fill"]; ok {
+		fill, err := arrayFromValue(rawFill, "visual_data.fill")
+		if err != nil {
+			return err
+		}
+		for i, rawLabel := range fill {
+			label, err := stringFromValue(rawLabel, fmt.Sprintf("visual_data.fill[%d]", i))
+			if err != nil {
+				return err
+			}
+			if _, ok := pointLabels[label]; !ok {
+				return fmt.Errorf("visual_data.fill[%d] references unknown point %q", i, label)
 			}
 		}
 	}

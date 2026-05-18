@@ -193,7 +193,7 @@ func (s *Service) generateContent(ctx context.Context, target Target) (Generated
 	}
 
 	var lastErr error
-	const maxAttempts = 2
+	const maxAttempts = 3
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		started := time.Now()
 		content, err := s.ai.GenerateTask(ctx, target)

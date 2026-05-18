@@ -31,8 +31,8 @@ func TestGenerateTask(t *testing.T) {
 	client := requireAIClient(t)
 
 	target := tasks.Target{
-		OgeNumber:   13,
-		SubtypeCode: "ineq_linear",
+		OgeNumber:   16,
+		SubtypeCode: "circle_tangents",
 	}
 
 	result, err := client.GenerateTask(context.Background(), target)

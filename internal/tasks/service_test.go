@@ -88,8 +88,8 @@ func TestGenerateRetriesInvalidVisualDataThenFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if ai.generateCalls != 2 {
-		t.Fatalf("expected 2 AI calls, got %d", ai.generateCalls)
+	if ai.generateCalls != 3 {
+		t.Fatalf("expected 3 AI calls, got %d", ai.generateCalls)
 	}
 	if task.Source != "fallback" {
 		t.Fatalf("expected fallback source, got %q", task.Source)
