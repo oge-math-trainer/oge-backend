@@ -277,7 +277,6 @@ Strict answer rules:
 Text rules:
 - All user-facing text must be in Russian.
 - Use plain text math only: x^2 + 3x - 5 = 0, sqrt(48), 3/4.
-- Never use LaTeX, backslashes, markdown, code fences, $, \frac, \sqrt, \( \), \[ \].
 - Create a new task in the same format; do not copy SDAM GIA examples verbatim.
 
 %s%s`,
