@@ -343,48 +343,48 @@ func nonEmptySlice(values []string) []string {
 	return out
 }
 
-func sanitizeAIResponse(raw string) string {
-	raw = strings.TrimSpace(raw)
-	raw = strings.TrimPrefix(raw, "```json")
-	raw = strings.TrimPrefix(raw, "```")
-	raw = strings.TrimSuffix(raw, "```")
+// func sanitizeAIResponse(raw string) string {
+// 	raw = strings.TrimSpace(raw)
+// 	raw = strings.TrimPrefix(raw, "```json")
+// 	raw = strings.TrimPrefix(raw, "```")
+// 	raw = strings.TrimSuffix(raw, "```")
 
-	start := strings.Index(raw, "{")
-	end := strings.LastIndex(raw, "}")
-	if start >= 0 && end > start {
-		raw = raw[start : end+1]
-	}
+// 	start := strings.Index(raw, "{")
+// 	end := strings.LastIndex(raw, "}")
+// 	if start >= 0 && end > start {
+// 		raw = raw[start : end+1]
+// 	}
 
-	raw = strings.ReplaceAll(raw, `\ \ `, "")
-	raw = strings.ReplaceAll(raw, `\ \`, "")
-	raw = strings.ReplaceAll(raw, `\(`, "")
-	raw = strings.ReplaceAll(raw, `\)`, "")
-	raw = strings.ReplaceAll(raw, `\[`, "")
-	raw = strings.ReplaceAll(raw, `\]`, "")
-	raw = strings.ReplaceAll(raw, `\\(`, "")
-	raw = strings.ReplaceAll(raw, `\\)`, "")
-	raw = strings.ReplaceAll(raw, `\\[`, "")
-	raw = strings.ReplaceAll(raw, `\\]`, "")
-	raw = strings.ReplaceAll(raw, `\begin{cases}`, "")
-	raw = strings.ReplaceAll(raw, `\end{cases}`, "")
-	raw = strings.ReplaceAll(raw, `\\begin{cases}`, "")
-	raw = strings.ReplaceAll(raw, `\\end{cases}`, "")
-	raw = strings.ReplaceAll(raw, `\begin`, "")
-	raw = strings.ReplaceAll(raw, `\end`, "")
+// 	raw = strings.ReplaceAll(raw, `\ \ `, "")
+// 	raw = strings.ReplaceAll(raw, `\ \`, "")
+// 	raw = strings.ReplaceAll(raw, `\(`, "")
+// 	raw = strings.ReplaceAll(raw, `\)`, "")
+// 	raw = strings.ReplaceAll(raw, `\[`, "")
+// 	raw = strings.ReplaceAll(raw, `\]`, "")
+// 	raw = strings.ReplaceAll(raw, `\\(`, "")
+// 	raw = strings.ReplaceAll(raw, `\\)`, "")
+// 	raw = strings.ReplaceAll(raw, `\\[`, "")
+// 	raw = strings.ReplaceAll(raw, `\\]`, "")
+// 	raw = strings.ReplaceAll(raw, `\begin{cases}`, "")
+// 	raw = strings.ReplaceAll(raw, `\end{cases}`, "")
+// 	raw = strings.ReplaceAll(raw, `\\begin{cases}`, "")
+// 	raw = strings.ReplaceAll(raw, `\\end{cases}`, "")
+// 	raw = strings.ReplaceAll(raw, `\begin`, "")
+// 	raw = strings.ReplaceAll(raw, `\end`, "")
 
-	reFrac := regexp.MustCompile(`\\frac\{([^}]+)\}\{([^}]+)\}`)
-	raw = reFrac.ReplaceAllString(raw, "$1/$2")
-	raw = regexp.MustCompile(`\\cdot`).ReplaceAllString(raw, "*")
-	reSqrt := regexp.MustCompile(`\\sqrt\{([^}]+)\}`)
-	raw = reSqrt.ReplaceAllString(raw, "sqrt($1)")
-	raw = regexp.MustCompile(`\\{1,2}([a-zA-Z0-9{}()^/_\-+*=])`).ReplaceAllString(raw, "$1")
-	raw = strings.ReplaceAll(raw, `\\`, "")
-	raw = strings.ReplaceAll(raw, `\`, "")
-	raw = strings.ReplaceAll(raw, "$", "")
-	raw = regexp.MustCompile(`\s+`).ReplaceAllString(raw, " ")
+// 	reFrac := regexp.MustCompile(`\\frac\{([^}]+)\}\{([^}]+)\}`)
+// 	raw = reFrac.ReplaceAllString(raw, "$1/$2")
+// 	raw = regexp.MustCompile(`\\cdot`).ReplaceAllString(raw, "*")
+// 	reSqrt := regexp.MustCompile(`\\sqrt\{([^}]+)\}`)
+// 	raw = reSqrt.ReplaceAllString(raw, "sqrt($1)")
+// 	raw = regexp.MustCompile(`\\{1,2}([a-zA-Z0-9{}()^/_\-+*=])`).ReplaceAllString(raw, "$1")
+// 	raw = strings.ReplaceAll(raw, `\\`, "")
+// 	raw = strings.ReplaceAll(raw, `\`, "")
+// 	raw = strings.ReplaceAll(raw, "$", "")
+// 	raw = regexp.MustCompile(`\s+`).ReplaceAllString(raw, " ")
 
-	return strings.TrimSpace(raw)
-}
+// 	return strings.TrimSpace(raw)
+// }
 
 func (c *Client) IsConfigured() bool {
 	return c != nil && strings.TrimSpace(c.apiKey) != "" && strings.TrimSpace(c.baseURL) != "" && strings.TrimSpace(c.model) != ""
@@ -412,7 +412,7 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 			continue
 		}
 
-		raw = sanitizeAIResponse(raw)
+		// raw = sanitizeAIResponse(raw)
 
 		var result tasks.GeneratedContent
 		if err := json.Unmarshal([]byte(raw), &result); err != nil {
@@ -471,9 +471,9 @@ func validateGeneratedTask(target tasks.Target, result *tasks.GeneratedContent) 
 	if !result.IsValid {
 		return fmt.Errorf("is_valid=false")
 	}
-	if containsForbiddenMathSyntax(result.Question) || containsForbiddenMathSyntax(strings.Join(result.SolutionSteps, " ")) {
-		return fmt.Errorf("text contains LaTeX or forbidden math syntax")
-	}
+	// if containsForbiddenMathSyntax(result.Question) || containsForbiddenMathSyntax(strings.Join(result.SolutionSteps, " ")) {
+	// 	return fmt.Errorf("text contains LaTeX or forbidden math syntax")
+	// }
 	if tasks.RequiresVisualData(target) {
 		visualData, err := tasks.NormalizeAndValidateVisualData(target, result)
 		if err != nil {
@@ -490,9 +490,9 @@ func validateGeneratedTask(target tasks.Target, result *tasks.GeneratedContent) 
 	return nil
 }
 
-func containsForbiddenMathSyntax(text string) bool {
-	return strings.Contains(text, `\`) || strings.Contains(text, "$")
-}
+// func containsForbiddenMathSyntax(text string) bool {
+// 	return strings.Contains(text, `\`) || strings.Contains(text, "$")
+// }
 
 func validateTaskTheme(target tasks.Target, question string) error {
 	text := strings.ToLower(question)
@@ -537,8 +537,7 @@ Rules:
 - All text in Russian
 - is_correct must be boolean
 - Be strict: only accept mathematically correct answers
-- Normalize answers: treat comma and dot as decimal separator, ignore leading zeros
-- Do NOT use LaTeX, arrows, or special math symbols. Use plain text only.`
+- Normalize answers: treat comma and dot as decimal separator, ignore leading zeros.`
 
 	type checkInput struct {
 		Question      string `json:"question"`
@@ -558,7 +557,7 @@ Rules:
 	if err != nil {
 		return tasks.CheckResult{}, fmt.Errorf("CheckAnswer: %w", err)
 	}
-	raw = sanitizeAIResponse(raw)
+	// raw = sanitizeAIResponse(raw)
 
 	var result tasks.CheckResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
@@ -581,8 +580,7 @@ Rules:
 - The hint must be a question, not a statement
 - Do NOT reveal the answer or the full solution method
 - Be specific to this problem, not generic advice
-- Maximum 2 sentences
-- Do NOT use LaTeX, arrows, or special math symbols. Use plain text only.`
+- Maximum 2 sentences.`
 
 	type hintInput struct {
 		Question string `json:"question"`
@@ -596,7 +594,7 @@ Rules:
 	if err != nil {
 		return tasks.HintResult{}, fmt.Errorf("Hint: %w", err)
 	}
-	raw = sanitizeAIResponse(raw)
+	// raw = sanitizeAIResponse(raw)
 
 	var parsed struct {
 		Hint string `json:"hint"`
@@ -621,8 +619,7 @@ Rules:
 - All text in Russian
 - steps minimum 3, maximum 7
 - Each step must show the calculation explicitly
-- Use simple language for a 9th-grade student
-- Do NOT use LaTeX, arrows, or special math symbols. Use plain text only.`
+- Use simple language for a 9th-grade student.`
 
 	type explainInput struct {
 		Question      string `json:"question"`
@@ -640,7 +637,7 @@ Rules:
 	if err != nil {
 		return tasks.ExplainResult{}, fmt.Errorf("Explain: %w", err)
 	}
-	raw = sanitizeAIResponse(raw)
+	// raw = sanitizeAIResponse(raw)
 
 	var result tasks.ExplainResult
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
@@ -672,7 +669,7 @@ func (c *Client) AnalyzeDiagnostic(ctx context.Context, answers []diagnostic.Ans
 	if err != nil {
 		return diagnostic.Analysis{}, fmt.Errorf("AnalyzeDiagnostic: %w", err)
 	}
-	raw = sanitizeAIResponse(raw)
+	// raw = sanitizeAIResponse(raw)
 
 	var result diagnostic.Analysis
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
