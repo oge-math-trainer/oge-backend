@@ -86,7 +86,7 @@ type CreateTask struct {
 	ValidationNotes string
 	Source          string
 	VisualData      VisualData
-	GraphData       *GraphTaskParams `json:"graph_data,omitempty"`
+	Graphs          []GraphInfo
 }
 
 type FallbackTask struct {
@@ -179,6 +179,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		ValidationNotes: strings.TrimSpace(content.ValidationNotes),
 		Source:          source,
 		VisualData:      content.VisualData,
+		Graphs:          content.Graphs,
 	})
 }
 
