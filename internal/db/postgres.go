@@ -586,7 +586,7 @@ func scanGeneratedTask(row pgx.Row) (tasks.Task, error) {
 			return tasks.Task{}, app.Internal(err)
 		}
 		if len(graphs) > 0 {
-			task.GraphData = &tasks.GraphTaskParams{Graphs: graphs}
+			task.Graphs = graphs
 		}
 	}
 	task.TaskTypeID = ptrFromNullInt64(taskTypeID)
