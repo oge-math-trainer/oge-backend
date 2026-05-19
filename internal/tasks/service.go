@@ -36,29 +36,29 @@ type GraphInfo struct {
 }
 
 // GraphTaskParams - контейнер для графиков задачи
-type GraphTaskParams struct {
-	Graphs []GraphInfo `json:"graphs,omitempty"`
-}
+// type GraphTaskParams struct {
+// 	Graphs []GraphInfo `json:"graphs,omitempty"`
+// }
 
 type VisualData map[string]any
 
 type Task struct {
-	ID              int64            `json:"id"`
-	UserID          int64            `json:"-"`
-	Mode            string           `json:"mode"`
-	TaskTypeID      *int64           `json:"-"`
-	OgeNumber       int              `json:"oge_number"`
-	SubtypeCode     string           `json:"subtype_code"`
-	Question        string           `json:"question"`
-	CorrectAnswer   string           `json:"-"`
-	SolutionSteps   []string         `json:"-"`
-	SelfCheck       string           `json:"-"`
-	IsValid         bool             `json:"-"`
-	ValidationNotes string           `json:"-"`
-	Source          string           `json:"source"`
-	CreatedAt       time.Time        `json:"created_at,omitempty"`
-	VisualData      VisualData       `json:"visual_data,omitempty"`
-	GraphData       *GraphTaskParams `json:"graphs,omitempty"` // ← Фронтенд ждёт "graphs"
+	ID              int64       `json:"id"`
+	UserID          int64       `json:"-"`
+	Mode            string      `json:"mode"`
+	TaskTypeID      *int64      `json:"-"`
+	OgeNumber       int         `json:"oge_number"`
+	SubtypeCode     string      `json:"subtype_code"`
+	Question        string      `json:"question"`
+	CorrectAnswer   string      `json:"-"`
+	SolutionSteps   []string    `json:"-"`
+	SelfCheck       string      `json:"-"`
+	IsValid         bool        `json:"-"`
+	ValidationNotes string      `json:"-"`
+	Source          string      `json:"source"`
+	CreatedAt       time.Time   `json:"created_at,omitempty"`
+	VisualData      VisualData  `json:"visual_data,omitempty"`
+	Graphs          []GraphInfo `json:"graphs,omitempty"` // ← Фронтенд ждёт "graphs"
 }
 
 type GeneratedContent struct {
