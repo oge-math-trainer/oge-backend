@@ -612,14 +612,11 @@ The student failed to solve it. Give a complete step-by-step explanation.
 Respond ONLY with valid JSON. No markdown, no code blocks. Start with { and end with }.
 Return exactly this structure:
 {
-  "explanation": "full explanation in Russian: what is given, what is required, the method used",
-  "steps": ["step 1 with calculation", "step 2 with calculation", "step 3 with calculation"]
+  "explanation": "full explanation in Russian: what is given, what is required, the method used"
 }
 Rules:
 - All text in Russian
-- steps minimum 3, maximum 7
-- Each step must show the calculation explicitly
-- Use simple language for a 9th-grade student.`
+- Use a REALLY simple language for a 9th-grade student, like they barely understand maths.`
 
 	type explainInput struct {
 		Question      string `json:"question"`
