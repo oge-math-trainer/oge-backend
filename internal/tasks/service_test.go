@@ -153,6 +153,70 @@ func TestGenerateCustomRequiresTargetFields(t *testing.T) {
 	}
 }
 
+func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
+	prepared := &PreparedTask{
+		ID:              123,
+		Mode:            ModeCustom,
+		OgeNumber:       9,
+		SubtypeCode:     "linear_equation",
+		Question:        "cached question",
+		CorrectAnswer:   "3",
+		SolutionSteps:   []string{"step 1", "step 2", "step 3"},
+		SelfCheck:       "check",
+		IsValid:         true,
+		ValidationNotes: "ok",
+		Source:          "prepared",
+	}
+	repo := &fakeRepo{prepared: prepared}
+	service := NewService(repo, &fakeAI{configured: true})
+	oge := 9
+
+	task, err := service.Generate(context.Background(), GenerateRequest{
+		UserID:      1,
+		Mode:        ModeCustom,
+		OgeNumber:   &oge,
+		SubtypeCode: "linear_equation",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if task.Question != "cached question" {
+		t.Fatalf("expected cached question, got %q", task.Question)
+	}
+	if task.Source != "prepared" {
+		t.Fatalf("expected prepared source, got %q", task.Source)
+	}
+	if task.Mode != ModeCustom {
+		t.Fatalf("expected mode %q, got %q", ModeCustom, task.Mode)
+	}
+	if repo.created.UserID != 1 {
+		t.Fatalf("expected created user id 1, got %d", repo.created.UserID)
+	}
+}
+
+func TestPrepareTaskStoresValidatedPreparedTask(t *testing.T) {
+	repo := &fakeRepo{}
+	service := NewService(repo, &fakeAI{configured: true})
+	target := Target{TaskTypeID: ptrInt64(7), OgeNumber: 9, SubtypeCode: "linear_equation"}
+
+	prepared, err := service.PrepareTask(context.Background(), target)
+	if err != nil {
+		t.Fatalf("PrepareTask returned error: %v", err)
+	}
+	if prepared.ID == 0 {
+		t.Fatal("expected saved prepared task id")
+	}
+	if prepared.Source != "qwen" {
+		t.Fatalf("expected source qwen, got %q", prepared.Source)
+	}
+	if repo.prepared == nil {
+		t.Fatal("expected prepared task to be stored in repo")
+	}
+	if repo.prepared.OgeNumber != 9 || repo.prepared.SubtypeCode != "linear_equation" {
+		t.Fatalf("unexpected prepared task target: %+v", repo.prepared)
+	}
+}
+
 func TestCheckWithoutAIKeyReturnsAIUnavailable(t *testing.T) {
 	repo := &fakeRepo{
 		task: Task{ID: 1, UserID: 1, Mode: ModeWeak, OgeNumber: 9, SubtypeCode: "linear_equation", Question: "x + 2 = 5", CorrectAnswer: "3"},
@@ -193,6 +257,7 @@ func TestCheckStoresOriginalTaskMode(t *testing.T) {
 }
 
 type fakeRepo struct {
+	prepared    *PreparedTask
 	created     CreateTask
 	task        Task
 	attemptMode string
@@ -200,6 +265,38 @@ type fakeRepo struct {
 
 func (r *fakeRepo) GetWeakTarget(context.Context, int64) (Target, error) {
 	return Target{OgeNumber: 9, SubtypeCode: "weak_topic"}, nil
+}
+
+func (r *fakeRepo) CountPreparedTasks(context.Context) (int, error) {
+	return 0, nil
+}
+
+func (r *fakeRepo) CreatePreparedTask(_ context.Context, task CreateTask) (PreparedTask, error) {
+	prepared := PreparedTask{
+		ID:              100,
+		Mode:            task.Mode,
+		TaskTypeID:      task.TaskTypeID,
+		OgeNumber:       task.OgeNumber,
+		SubtypeCode:     task.SubtypeCode,
+		Question:        task.Question,
+		CorrectAnswer:   task.CorrectAnswer,
+		SolutionSteps:   task.SolutionSteps,
+		SelfCheck:       task.SelfCheck,
+		IsValid:         task.IsValid,
+		ValidationNotes: task.ValidationNotes,
+		Source:          task.Source,
+		VisualData:      task.VisualData,
+		Graphs:          task.Graphs,
+	}
+	r.prepared = &prepared
+	return prepared, nil
+}
+
+func (r *fakeRepo) GetPreparedTask(context.Context, Target) (PreparedTask, error) {
+	if r.prepared == nil {
+		return PreparedTask{}, app.NotFound("Готовая задача не найдена")
+	}
+	return *r.prepared, nil
 }
 
 func (r *fakeRepo) GetRandomTaskType(context.Context) (Target, error) {
@@ -286,4 +383,8 @@ func validGeneratedContent(visualData VisualData) GeneratedContent {
 		ValidationNotes: "ok",
 		VisualData:      visualData,
 	}
+}
+
+func ptrInt64(value int64) *int64 {
+	return &value
 }

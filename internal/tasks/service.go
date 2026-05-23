@@ -61,6 +61,24 @@ type Task struct {
 	Graphs          []GraphInfo `json:"graphs,omitempty"` // ← Фронтенд ждёт "graphs"
 }
 
+type PreparedTask struct {
+	ID              int64       `json:"id"`
+	Mode            string      `json:"mode"`
+	TaskTypeID      *int64      `json:"-"`
+	OgeNumber       int         `json:"oge_number"`
+	SubtypeCode     string      `json:"subtype_code"`
+	Question        string      `json:"question"`
+	CorrectAnswer   string      `json:"-"`
+	SolutionSteps   []string    `json:"-"`
+	SelfCheck       string      `json:"-"`
+	IsValid         bool        `json:"-"`
+	ValidationNotes string      `json:"-"`
+	Source          string      `json:"source"`
+	CreatedAt       time.Time   `json:"created_at,omitempty"`
+	VisualData      VisualData  `json:"visual_data,omitempty"`
+	Graphs          []GraphInfo `json:"graphs,omitempty"`
+}
+
 type GeneratedContent struct {
 	Question        string      `json:"question"`
 	CorrectAnswer   string      `json:"correct_answer"`
@@ -131,6 +149,9 @@ type Repository interface {
 	GetWeakTarget(ctx context.Context, userID int64) (Target, error)
 	GetRandomTaskType(ctx context.Context) (Target, error)
 	ResolveTarget(ctx context.Context, target Target) (Target, error)
+	GetPreparedTask(ctx context.Context, target Target) (PreparedTask, error)
+	CountPreparedTasks(ctx context.Context) (int, error)
+	CreatePreparedTask(ctx context.Context, task CreateTask) (PreparedTask, error)
 	CreateGeneratedTask(ctx context.Context, task CreateTask) (Task, error)
 	GetGeneratedTaskForUser(ctx context.Context, userID, id int64) (Task, error)
 	SaveAttempt(ctx context.Context, userID, taskID int64, mode, studentAnswer string, isCorrect bool, aiFeedback any) error
@@ -160,14 +181,59 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		return Task{}, err
 	}
 
+	preparedTask, err := s.repo.GetPreparedTask(ctx, target)
+	if err == nil {
+		return s.repo.CreateGeneratedTask(ctx, CreateTask{
+			UserID:          req.UserID,
+			Mode:            storedMode(req),
+			TaskTypeID:      preparedTask.TaskTypeID,
+			OgeNumber:       preparedTask.OgeNumber,
+			SubtypeCode:     preparedTask.SubtypeCode,
+			Question:        strings.TrimSpace(preparedTask.Question),
+			CorrectAnswer:   strings.TrimSpace(preparedTask.CorrectAnswer),
+			SolutionSteps:   preparedTask.SolutionSteps,
+			SelfCheck:       strings.TrimSpace(preparedTask.SelfCheck),
+			IsValid:         preparedTask.IsValid,
+			ValidationNotes: strings.TrimSpace(preparedTask.ValidationNotes),
+			Source:          preparedTask.Source,
+			VisualData:      preparedTask.VisualData,
+			Graphs:          preparedTask.Graphs,
+		})
+	}
+	var appErr *app.Error
+	if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
+		// No prepared task available, continue with generation.
+		content, source, err := s.generateContent(ctx, target)
+		if err != nil {
+			return Task{}, err
+		}
+		return s.repo.CreateGeneratedTask(ctx, CreateTask{
+			UserID:          req.UserID,
+			Mode:            storedMode(req),
+			TaskTypeID:      target.TaskTypeID,
+			OgeNumber:       target.OgeNumber,
+			SubtypeCode:     target.SubtypeCode,
+			Question:        strings.TrimSpace(content.Question),
+			CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
+			SolutionSteps:   content.SolutionSteps,
+			SelfCheck:       strings.TrimSpace(content.SelfCheck),
+			IsValid:         content.IsValid,
+			ValidationNotes: strings.TrimSpace(content.ValidationNotes),
+			Source:          source,
+			VisualData:      content.VisualData,
+			Graphs:          content.Graphs,
+		})
+	}
+	return Task{}, err
+}
+
+func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask, error) {
 	content, source, err := s.generateContent(ctx, target)
 	if err != nil {
-		return Task{}, err
+		return PreparedTask{}, err
 	}
-
-	return s.repo.CreateGeneratedTask(ctx, CreateTask{
-		UserID:          req.UserID,
-		Mode:            storedMode(req),
+	prepared, err := s.repo.CreatePreparedTask(ctx, CreateTask{
+		Mode:            ModeCustom,
 		TaskTypeID:      target.TaskTypeID,
 		OgeNumber:       target.OgeNumber,
 		SubtypeCode:     target.SubtypeCode,
@@ -181,6 +247,10 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		VisualData:      content.VisualData,
 		Graphs:          content.Graphs,
 	})
+	if err != nil {
+		return PreparedTask{}, err
+	}
+	return prepared, nil
 }
 
 func (s *Service) generateContent(ctx context.Context, target Target) (GeneratedContent, string, error) {

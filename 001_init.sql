@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_uidx
     ON users (lower(email));
 
-CREATE TABLE IF NOT EXISTS topics (
+CREATE TABLE IF NOT EXISTS topics ( 
     id BIGSERIAL PRIMARY KEY,
     code TEXT NOT NULL,
     title TEXT NOT NULL,

@@ -17,9 +17,11 @@ type Config struct {
 	AuthRateLimitRequests int
 	AuthRateLimitWindow   time.Duration
 	CORSAllowedOrigins    []string
-	AITunnelBaseURL     string
-	AITunnelAPIKey      string
-	AITunnelModel       string
+	AITunnelBaseURL       string
+	AITunnelAPIKey        string
+	AITunnelModel         string
+	PreparedTasksMin      int
+	PreparedTasksInterval time.Duration
 }
 
 func Load(path string) (Config, error) {
@@ -68,6 +70,24 @@ func Load(path string) (Config, error) {
 		}
 	}
 
+	preparedTasksMin := 20
+	if raw := strings.TrimSpace(os.Getenv("PREPARED_TASKS_MIN")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		preparedTasksMin = parsed
+	}
+
+	preparedTasksInterval := 5 * time.Minute
+	if raw := strings.TrimSpace(os.Getenv("PREPARED_TASKS_INTERVAL")); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		preparedTasksInterval = parsed
+	}
+
 	port := strings.TrimSpace(os.Getenv("PORT"))
 	if port == "" {
 		port = "8080"
@@ -81,9 +101,11 @@ func Load(path string) (Config, error) {
 		AuthRateLimitRequests: rateLimitRequests,
 		AuthRateLimitWindow:   rateLimitWindow,
 		CORSAllowedOrigins:    origins,
-		AITunnelBaseURL:     envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
-		AITunnelAPIKey:      strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
-		AITunnelModel:       strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
+		AITunnelBaseURL:       envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
+		AITunnelAPIKey:        strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
+		AITunnelModel:         strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
+		PreparedTasksMin:      preparedTasksMin,
+		PreparedTasksInterval: preparedTasksInterval,
 	}, nil
 }
 
@@ -107,10 +129,26 @@ func (c Config) ValidateServer() error {
 		return errors.New("AUTH_RATE_LIMIT_WINDOW must be positive")
 	}
 	if c.AITunnelAPIKey != "" && c.AITunnelModel == "" {
-    return errors.New("AITUNNEL_MODEL is required when AITUNNEL_API_KEY is set")
+		return errors.New("AITUNNEL_MODEL is required when AITUNNEL_API_KEY is set")
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
 		return errors.New("PORT must be a number")
+	}
+	return nil
+}
+
+func (c Config) ValidateWorker() error {
+	if c.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
+	if c.AITunnelAPIKey != "" && c.AITunnelModel == "" {
+		return errors.New("AITUNNEL_MODEL is required when AITUNNEL_API_KEY is set")
+	}
+	if c.PreparedTasksMin < 0 {
+		return errors.New("PREPARED_TASKS_MIN must be non-negative")
+	}
+	if c.PreparedTasksInterval <= 0 {
+		return errors.New("PREPARED_TASKS_INTERVAL must be positive")
 	}
 	return nil
 }

@@ -148,6 +148,88 @@ func (s *Store) ResolveTarget(ctx context.Context, target tasks.Target) (tasks.T
 	return resolved, nil
 }
 
+func (s *Store) GetPreparedTask(ctx context.Context, target tasks.Target) (tasks.PreparedTask, error) {
+	row := s.pool.QueryRow(ctx, `
+		UPDATE prepared_tasks
+		SET used = true
+		WHERE id = (
+			SELECT id
+			FROM prepared_tasks
+			WHERE used = false AND oge_number = $1 AND subtype_code = $2
+			ORDER BY created_at ASC
+			LIMIT 1
+		)
+		RETURNING id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
+			COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''), is_valid,
+			COALESCE(validation_notes, ''), generation_source,
+			COALESCE(visual_data, '{}'::jsonb), COALESCE(graphs, '[]'::jsonb), created_at
+	`, target.OgeNumber, target.SubtypeCode)
+
+	return scanPreparedTask(row)
+}
+
+func (s *Store) CountPreparedTasks(ctx context.Context) (int, error) {
+	var count int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM prepared_tasks
+		WHERE used = false
+	`).Scan(&count); err != nil {
+		return 0, app.Internal(err)
+	}
+	return count, nil
+}
+
+func (s *Store) CreatePreparedTask(ctx context.Context, task tasks.CreateTask) (tasks.PreparedTask, error) {
+	steps, err := json.Marshal(task.SolutionSteps)
+	if err != nil {
+		return tasks.PreparedTask{}, app.Internal(err)
+	}
+	var visualDataJSON json.RawMessage
+	if task.VisualData != nil {
+		b, err := json.Marshal(task.VisualData)
+		if err != nil {
+			return tasks.PreparedTask{}, app.Internal(err)
+		}
+		visualDataJSON = json.RawMessage(b)
+	}
+	var graphsJSON json.RawMessage
+	if len(task.Graphs) > 0 {
+		b, err := json.Marshal(task.Graphs)
+		if err != nil {
+			return tasks.PreparedTask{}, app.Internal(err)
+		}
+		graphsJSON = json.RawMessage(b)
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO prepared_tasks (
+			mode,
+			task_type_id,
+			oge_number,
+			subtype_code,
+			question,
+			correct_answer,
+			solution_steps,
+			self_check,
+			is_valid,
+			validation_notes,
+			visual_data,
+			graphs,
+			generation_source,
+			used
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, false)
+		RETURNING id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
+			COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''), is_valid,
+			COALESCE(validation_notes, ''), generation_source,
+			COALESCE(visual_data, '{}'::jsonb), COALESCE(graphs, '[]'::jsonb), created_at
+	`, task.Mode, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, task.Question, task.CorrectAnswer,
+		string(steps), task.SelfCheck, task.IsValid, task.ValidationNotes, visualDataJSON, graphsJSON, task.Source)
+
+	return scanPreparedTask(row)
+}
+
 func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) (tasks.Task, error) {
 	steps, err := json.Marshal(task.SolutionSteps)
 	if err != nil {
@@ -584,6 +666,57 @@ func scanGeneratedTask(row pgx.Row) (tasks.Task, error) {
 		var graphs []tasks.GraphInfo
 		if err := json.Unmarshal(graphsJSON, &graphs); err != nil {
 			return tasks.Task{}, app.Internal(err)
+		}
+		if len(graphs) > 0 {
+			task.Graphs = graphs
+		}
+	}
+	task.TaskTypeID = ptrFromNullInt64(taskTypeID)
+	return task, nil
+}
+
+func scanPreparedTask(row pgx.Row) (tasks.PreparedTask, error) {
+	var task tasks.PreparedTask
+	var stepsJSON []byte
+	var visualDataJSON []byte
+	var graphsJSON []byte
+	var taskTypeID sql.NullInt64
+	if err := row.Scan(
+		&task.ID,
+		&task.Mode,
+		&taskTypeID,
+		&task.OgeNumber,
+		&task.SubtypeCode,
+		&task.Question,
+		&task.CorrectAnswer,
+		&stepsJSON,
+		&task.SelfCheck,
+		&task.IsValid,
+		&task.ValidationNotes,
+		&task.Source,
+		&visualDataJSON,
+		&graphsJSON,
+		&task.CreatedAt,
+	); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return tasks.PreparedTask{}, app.NotFound("Готовая задача не найдена")
+		}
+		return tasks.PreparedTask{}, app.Internal(err)
+	}
+	if len(stepsJSON) > 0 {
+		_ = json.Unmarshal(stepsJSON, &task.SolutionSteps)
+	}
+	if len(visualDataJSON) > 0 && string(visualDataJSON) != "{}" && string(visualDataJSON) != "null" {
+		var visualData tasks.VisualData
+		if err := json.Unmarshal(visualDataJSON, &visualData); err != nil {
+			return tasks.PreparedTask{}, app.Internal(err)
+		}
+		task.VisualData = visualData
+	}
+	if len(graphsJSON) > 0 && string(graphsJSON) != "[]" && string(graphsJSON) != "null" {
+		var graphs []tasks.GraphInfo
+		if err := json.Unmarshal(graphsJSON, &graphs); err != nil {
+			return tasks.PreparedTask{}, app.Internal(err)
 		}
 		if len(graphs) > 0 {
 			task.Graphs = graphs
