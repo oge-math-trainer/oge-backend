@@ -75,7 +75,7 @@ func statusForCode(code string) int {
 		return http.StatusNotFound
 	case app.CodeConflict:
 		return http.StatusConflict
-	case app.CodeAIUnavailable, app.CodeDBUnavailable:
+	case app.CodeAIUnavailable, app.CodeTaskUnavailable, app.CodeDBUnavailable:
 		return http.StatusServiceUnavailable
 	case app.CodeRateLimited:
 		return http.StatusTooManyRequests

@@ -70,13 +70,16 @@ func Load(path string) (Config, error) {
 		}
 	}
 
-	preparedTasksMin := 20
+	preparedTasksMin := 50
 	if raw := strings.TrimSpace(os.Getenv("PREPARED_TASKS_MIN")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
 			return Config{}, err
 		}
 		preparedTasksMin = parsed
+	}
+	if preparedTasksMin > 0 && preparedTasksMin < 50 {
+		preparedTasksMin = 50
 	}
 
 	preparedTasksInterval := 5 * time.Minute

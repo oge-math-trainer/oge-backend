@@ -8,9 +8,10 @@ import (
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
-func TestGenerateWithoutAIKeyReturnsAIUnavailable(t *testing.T) {
+func TestGenerateWithoutPreparedTaskReturnsTaskUnavailable(t *testing.T) {
 	repo := &fakeRepo{}
-	service := NewService(repo, &fakeAI{configured: false})
+	ai := &fakeAI{configured: false}
+	service := NewService(repo, ai)
 	oge := 9
 
 	_, err := service.Generate(context.Background(), GenerateRequest{
@@ -23,37 +24,34 @@ func TestGenerateWithoutAIKeyReturnsAIUnavailable(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	var appErr *app.Error
-	if !errors.As(err, &appErr) || appErr.Code != app.CodeAIUnavailable {
-		t.Fatalf("expected ai_unavailable, got %v", err)
+	if !errors.As(err, &appErr) || appErr.Code != app.CodeTaskUnavailable {
+		t.Fatalf("expected task_unavailable, got %v", err)
+	}
+	if ai.generateCalls != 0 {
+		t.Fatalf("expected no AI calls, got %d", ai.generateCalls)
 	}
 }
 
-func TestGenerateVisualFallbackWithoutAIKey(t *testing.T) {
+func TestPrepareTaskVisualFallbackWithoutAIKey(t *testing.T) {
 	repo := &fakeRepo{}
 	service := NewService(repo, &fakeAI{configured: false})
-	oge := 11
 
-	task, err := service.Generate(context.Background(), GenerateRequest{
-		UserID:      1,
-		Mode:        ModeCustom,
-		OgeNumber:   &oge,
-		SubtypeCode: "graphs_linear",
-	})
+	task, err := service.PrepareTask(context.Background(), Target{OgeNumber: 11, SubtypeCode: "graphs_linear"})
 	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
+		t.Fatalf("PrepareTask returned error: %v", err)
 	}
 	if task.Source != "fallback" {
 		t.Fatalf("expected fallback source, got %q", task.Source)
 	}
-	if len(repo.created.VisualData) == 0 {
+	if len(repo.prepared.VisualData) == 0 {
 		t.Fatal("expected fallback visual_data")
 	}
-	if got := repo.created.VisualData["type"]; got != string(VisualKindGraph) {
+	if got := repo.prepared.VisualData["type"]; got != string(VisualKindGraph) {
 		t.Fatalf("expected graph visual_data, got %v", got)
 	}
 }
 
-func TestGenerateRetriesInvalidVisualDataThenFallback(t *testing.T) {
+func TestPrepareTaskRetriesInvalidVisualDataThenFallback(t *testing.T) {
 	repo := &fakeRepo{}
 	oge := 11
 	ai := &fakeAI{
@@ -79,14 +77,9 @@ func TestGenerateRetriesInvalidVisualDataThenFallback(t *testing.T) {
 	}
 	service := NewService(repo, ai)
 
-	task, err := service.Generate(context.Background(), GenerateRequest{
-		UserID:      1,
-		Mode:        ModeCustom,
-		OgeNumber:   &oge,
-		SubtypeCode: "graphs_linear",
-	})
+	task, err := service.PrepareTask(context.Background(), Target{OgeNumber: oge, SubtypeCode: "graphs_linear"})
 	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
+		t.Fatalf("PrepareTask returned error: %v", err)
 	}
 	if ai.generateCalls != 3 {
 		t.Fatalf("expected 3 AI calls, got %d", ai.generateCalls)
@@ -94,12 +87,12 @@ func TestGenerateRetriesInvalidVisualDataThenFallback(t *testing.T) {
 	if task.Source != "fallback" {
 		t.Fatalf("expected fallback source, got %q", task.Source)
 	}
-	if err := ValidateVisualData(Target{OgeNumber: 11, SubtypeCode: "graphs_linear"}, repo.created.VisualData); err != nil {
+	if err := ValidateVisualData(Target{OgeNumber: 11, SubtypeCode: "graphs_linear"}, repo.prepared.VisualData); err != nil {
 		t.Fatalf("fallback visual_data is invalid: %v", err)
 	}
 }
 
-func TestGenerateRetriesAndUsesSecondValidVisualData(t *testing.T) {
+func TestPrepareTaskRetriesAndUsesSecondValidVisualData(t *testing.T) {
 	repo := &fakeRepo{}
 	oge := 7
 	validVisual := VisualData{
@@ -120,14 +113,9 @@ func TestGenerateRetriesAndUsesSecondValidVisualData(t *testing.T) {
 	}
 	service := NewService(repo, ai)
 
-	task, err := service.Generate(context.Background(), GenerateRequest{
-		UserID:      1,
-		Mode:        ModeCustom,
-		OgeNumber:   &oge,
-		SubtypeCode: "numberline_compare",
-	})
+	task, err := service.PrepareTask(context.Background(), Target{OgeNumber: oge, SubtypeCode: "numberline_compare"})
 	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
+		t.Fatalf("PrepareTask returned error: %v", err)
 	}
 	if ai.generateCalls != 2 {
 		t.Fatalf("expected 2 AI calls, got %d", ai.generateCalls)
@@ -135,8 +123,8 @@ func TestGenerateRetriesAndUsesSecondValidVisualData(t *testing.T) {
 	if task.Source != "qwen" {
 		t.Fatalf("expected qwen source, got %q", task.Source)
 	}
-	if repo.created.VisualData["type"] != string(VisualKindNumberLine) {
-		t.Fatalf("expected number_line visual_data, got %v", repo.created.VisualData["type"])
+	if repo.prepared.VisualData["type"] != string(VisualKindNumberLine) {
+		t.Fatalf("expected number_line visual_data, got %v", repo.prepared.VisualData["type"])
 	}
 }
 
@@ -301,6 +289,10 @@ func (r *fakeRepo) GetPreparedTask(context.Context, Target) (PreparedTask, error
 
 func (r *fakeRepo) GetRandomTaskType(context.Context) (Target, error) {
 	return Target{OgeNumber: 10, SubtypeCode: "random_topic"}, nil
+}
+
+func (r *fakeRepo) GetPreparationTarget(context.Context, int) (Target, int, error) {
+	return Target{OgeNumber: 10, SubtypeCode: "random_topic"}, 0, nil
 }
 
 func (r *fakeRepo) ResolveTarget(_ context.Context, target Target) (Target, error) {

@@ -47,7 +47,7 @@ func main() {
 	taskService := tasks.NewService(store, aiClient)
 	worker := tasks.NewWorker(taskService, store, cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
 
-	log.Printf("prepared task worker starting: min=%d interval=%s", cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
+	log.Printf("prepared task worker starting: min_per_target=%d interval=%s", cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
 	if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}

@@ -5,6 +5,30 @@ import (
 	"time"
 )
 
+func TestLoadDefaultsPreparedTasksMinTo50(t *testing.T) {
+	t.Setenv("PREPARED_TASKS_MIN", "")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PreparedTasksMin != 50 {
+		t.Fatalf("expected PreparedTasksMin 50, got %d", cfg.PreparedTasksMin)
+	}
+}
+
+func TestLoadFloorsPreparedTasksMinAt50(t *testing.T) {
+	t.Setenv("PREPARED_TASKS_MIN", "20")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.PreparedTasksMin != 50 {
+		t.Fatalf("expected PreparedTasksMin floor 50, got %d", cfg.PreparedTasksMin)
+	}
+}
+
 // TestValidateServerRequiresModelWhenAITunnelKeySet проверяет,
 // что при заданном ключе AI-Tunnel обязательно указывать модель.
 func TestValidateServerRequiresModelWhenAITunnelKeySet(t *testing.T) {

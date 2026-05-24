@@ -3,14 +3,15 @@ package app
 import "fmt"
 
 const (
-	CodeValidation    = "validation_error"
-	CodeUnauthorized  = "unauthorized"
-	CodeNotFound      = "not_found"
-	CodeConflict      = "conflict"
-	CodeAIUnavailable = "ai_unavailable"
-	CodeDBUnavailable = "db_unavailable"
-	CodeRateLimited   = "rate_limited"
-	CodeInternal      = "internal_error"
+	CodeValidation      = "validation_error"
+	CodeUnauthorized    = "unauthorized"
+	CodeNotFound        = "not_found"
+	CodeConflict        = "conflict"
+	CodeAIUnavailable   = "ai_unavailable"
+	CodeTaskUnavailable = "task_unavailable"
+	CodeDBUnavailable   = "db_unavailable"
+	CodeRateLimited     = "rate_limited"
+	CodeInternal        = "internal_error"
 )
 
 type Error struct {
@@ -68,6 +69,13 @@ func Conflict(message string) *Error {
 
 func AIUnavailable(err error) *Error {
 	return WrapError(CodeAIUnavailable, "AI-сервис недоступен", err)
+}
+
+func TaskUnavailable(message string) *Error {
+	if message == "" {
+		message = "Готовая задача для этой категории еще готовится"
+	}
+	return NewError(CodeTaskUnavailable, message)
 }
 
 func DBUnavailable(err error) *Error {

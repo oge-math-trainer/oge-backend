@@ -116,13 +116,42 @@ func (s *Store) GetWeakTarget(ctx context.Context, userID int64) (tasks.Target, 
 
 func (s *Store) GetRandomTaskType(ctx context.Context) (tasks.Target, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, oge_number, subtype_code
-		FROM task_types
-		WHERE oge_number BETWEEN 6 AND 19
+		SELECT tt.id, tt.oge_number, tt.subtype_code
+		FROM task_types tt
+		WHERE tt.oge_number BETWEEN 6 AND 19
+			AND EXISTS (
+				SELECT 1
+				FROM prepared_tasks pt
+				WHERE pt.used = false
+					AND pt.oge_number = tt.oge_number
+					AND pt.subtype_code = tt.subtype_code
+			)
 		ORDER BY random()
 		LIMIT 1
 	`)
-	return scanTarget(row, "Не найден тип задания для режима all")
+	return scanTarget(row, "Нет готовых заданий для режима all")
+}
+
+func (s *Store) GetPreparationTarget(ctx context.Context, minReady int) (tasks.Target, int, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT tt.id, tt.oge_number, tt.subtype_code, COUNT(pt.id)::int
+		FROM task_types tt
+		LEFT JOIN prepared_tasks pt
+			ON pt.used = false
+			AND pt.oge_number = tt.oge_number
+			AND pt.subtype_code = tt.subtype_code
+		WHERE tt.oge_number BETWEEN 6 AND 19
+		GROUP BY tt.id, tt.oge_number, tt.subtype_code
+		HAVING COUNT(pt.id) < $1
+		ORDER BY COUNT(pt.id) ASC, random()
+		LIMIT 1
+	`, minReady)
+
+	target, err := scanTargetWithReadyCount(row, "Все категории заполнены")
+	if err != nil {
+		return tasks.Target{}, 0, err
+	}
+	return target.Target, target.ReadyCount, nil
 }
 
 func (s *Store) ResolveTarget(ctx context.Context, target tasks.Target) (tasks.Target, error) {
@@ -604,6 +633,24 @@ func scanTarget(row pgx.Row, notFoundMessage string) (tasks.Target, error) {
 	}
 	target.TaskTypeID = ptrFromNullInt64(taskTypeID)
 	return target, nil
+}
+
+type targetWithReadyCount struct {
+	Target     tasks.Target
+	ReadyCount int
+}
+
+func scanTargetWithReadyCount(row pgx.Row, notFoundMessage string) (targetWithReadyCount, error) {
+	var out targetWithReadyCount
+	var taskTypeID sql.NullInt64
+	if err := row.Scan(&taskTypeID, &out.Target.OgeNumber, &out.Target.SubtypeCode, &out.ReadyCount); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return targetWithReadyCount{}, app.NotFound(notFoundMessage)
+		}
+		return targetWithReadyCount{}, app.Internal(err)
+	}
+	out.Target.TaskTypeID = ptrFromNullInt64(taskTypeID)
+	return out, nil
 }
 
 func collectTargets(rows pgx.Rows) ([]tasks.Target, error) {

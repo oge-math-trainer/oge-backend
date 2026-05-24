@@ -2,8 +2,12 @@ package tasks
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"time"
+
+	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
 type Worker struct {
@@ -38,28 +42,34 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) fillPreparedTasks(ctx context.Context) error {
-	count, err := w.repo.CountPreparedTasks(ctx)
-	if err != nil {
-		return err
-	}
-	if count >= w.minReady {
-		log.Printf("prepared task worker: enough tasks available (%d >= %d)", count, w.minReady)
-		return nil
-	}
-	missing := w.minReady - count
-	log.Printf("prepared task worker: under threshold, need %d more tasks", missing)
-
-	for i := 0; i < missing; i++ {
-		target, err := w.repo.GetRandomTaskType(ctx)
-		if err != nil {
+	failures := 0
+	for {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
+
+		target, ready, err := w.repo.GetPreparationTarget(ctx, w.minReady)
+		if err != nil {
+			var appErr *app.Error
+			if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
+				log.Printf("prepared task worker: every target has at least %d ready tasks", w.minReady)
+				return nil
+			}
+			return err
+		}
+
+		log.Printf("prepared task worker: target %d/%s has %d/%d ready tasks",
+			target.OgeNumber, target.SubtypeCode, ready, w.minReady)
 		prepared, err := w.service.PrepareTask(ctx, target)
 		if err != nil {
 			log.Printf("failed to prepare task for target %d/%s: %v", target.OgeNumber, target.SubtypeCode, err)
+			failures++
+			if failures >= 5 {
+				return fmt.Errorf("too many preparation failures")
+			}
 			continue
 		}
+		failures = 0
 		log.Printf("prepared task created: id=%d target=%d/%s source=%s", prepared.ID, prepared.OgeNumber, prepared.SubtypeCode, prepared.Source)
 	}
-	return nil
 }

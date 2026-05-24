@@ -148,6 +148,7 @@ type ExplainResult struct {
 type Repository interface {
 	GetWeakTarget(ctx context.Context, userID int64) (Target, error)
 	GetRandomTaskType(ctx context.Context) (Target, error)
+	GetPreparationTarget(ctx context.Context, minReady int) (Target, int, error)
 	ResolveTarget(ctx context.Context, target Target) (Target, error)
 	GetPreparedTask(ctx context.Context, target Target) (PreparedTask, error)
 	CountPreparedTasks(ctx context.Context) (int, error)
@@ -183,6 +184,8 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 
 	preparedTask, err := s.repo.GetPreparedTask(ctx, target)
 	if err == nil {
+		log.Printf("task generate cache hit: user_id=%d mode=%s target=%d/%s prepared_id=%d",
+			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID)
 		return s.repo.CreateGeneratedTask(ctx, CreateTask{
 			UserID:          req.UserID,
 			Mode:            storedMode(req),
@@ -202,28 +205,12 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 	}
 	var appErr *app.Error
 	if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
-		// No prepared task available, continue with generation.
-		content, source, err := s.generateContent(ctx, target)
-		if err != nil {
-			return Task{}, err
-		}
-		return s.repo.CreateGeneratedTask(ctx, CreateTask{
-			UserID:          req.UserID,
-			Mode:            storedMode(req),
-			TaskTypeID:      target.TaskTypeID,
-			OgeNumber:       target.OgeNumber,
-			SubtypeCode:     target.SubtypeCode,
-			Question:        strings.TrimSpace(content.Question),
-			CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
-			SolutionSteps:   content.SolutionSteps,
-			SelfCheck:       strings.TrimSpace(content.SelfCheck),
-			IsValid:         content.IsValid,
-			ValidationNotes: strings.TrimSpace(content.ValidationNotes),
-			Source:          source,
-			VisualData:      content.VisualData,
-			Graphs:          content.Graphs,
-		})
+		log.Printf("task generate cache miss: user_id=%d mode=%s target=%d/%s",
+			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode)
+		return Task{}, app.TaskUnavailable("Готовая задача для этой категории еще готовится")
 	}
+	log.Printf("task generate cache error: user_id=%d mode=%s target=%d/%s error=%v",
+		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, err)
 	return Task{}, err
 }
 
@@ -381,10 +368,19 @@ func (s *Service) resolveTarget(ctx context.Context, req GenerateRequest) (Targe
 	case ModeWeak:
 		return s.repo.GetWeakTarget(ctx, req.UserID)
 	case ModeAll:
-		return s.repo.GetRandomTaskType(ctx)
+		target, err := s.repo.GetRandomTaskType(ctx)
+		if isAppNotFound(err) {
+			return Target{}, app.TaskUnavailable("Готовые задачи еще готовятся")
+		}
+		return target, err
 	default:
 		return Target{}, app.Validation("Некорректный режим тренировки")
 	}
+}
+
+func isAppNotFound(err error) bool {
+	var appErr *app.Error
+	return errors.As(err, &appErr) && appErr.Code == app.CodeNotFound
 }
 
 func storedMode(req GenerateRequest) string {

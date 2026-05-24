@@ -62,7 +62,7 @@ func main() {
 	if aiClient.IsConfigured() && cfg.PreparedTasksMin > 0 {
 		worker := tasks.NewWorker(taskService, store, cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
 		go func() {
-			log.Printf("embedded prepared task worker starting: min=%d interval=%s", cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
+			log.Printf("embedded prepared task worker starting: min_per_target=%d interval=%s", cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
 			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				log.Printf("embedded prepared task worker stopped: %v", err)
 			}
