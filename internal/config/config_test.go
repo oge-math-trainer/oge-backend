@@ -66,7 +66,7 @@ func TestValidateServerOKWithAITunnelConfig(t *testing.T) {
 		AuthRateLimitRequests: 10,
 		AuthRateLimitWindow:   time.Minute,
 		AITunnelAPIKey:        "sk-aitunnel-test123",
-		AITunnelModel:         "qwen3-235b-a22b-2507",
+		AITunnelModel:         "gpt-4o-mini",
 		AITunnelBaseURL:       "https://api.aitunnel.ru/v1",
 	}
 

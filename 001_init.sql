@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS generated_tasks (
     is_valid BOOLEAN NOT NULL DEFAULT false,
     validation_notes TEXT,
     visual_data JSONB,
-    generation_source TEXT NOT NULL DEFAULT 'qwen',
+    generation_source TEXT NOT NULL DEFAULT 'gpt-4o-mini',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT generated_tasks_oge_number_chk CHECK (oge_number BETWEEN 6 AND 19),
     CONSTRAINT generated_tasks_subtype_code_not_empty_chk CHECK (length(trim(subtype_code)) > 0),

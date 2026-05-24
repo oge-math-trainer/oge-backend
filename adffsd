@@ -1,0 +1,116 @@
+warning: in the working copy of 'ai/client.go', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'internal/config/config_test.go', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'internal/tasks/service.go', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'internal/tasks/service_test.go', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/001_init.sql b/001_init.sql[m
+[1mindex 59116d9..49d4676 100644[m
+[1m--- a/001_init.sql[m
+[1m+++ b/001_init.sql[m
+[36m@@ -84,7 +84,7 @@[m [mCREATE TABLE IF NOT EXISTS generated_tasks ([m
+     is_valid BOOLEAN NOT NULL DEFAULT false,[m
+     validation_notes TEXT,[m
+     visual_data JSONB,[m
+[31m-    generation_source TEXT NOT NULL DEFAULT 'qwen',[m
+[32m+[m[32m    generation_source TEXT NOT NULL DEFAULT 'gpt-4o-mini',[m
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),[m
+     CONSTRAINT generated_tasks_oge_number_chk CHECK (oge_number BETWEEN 6 AND 19),[m
+     CONSTRAINT generated_tasks_subtype_code_not_empty_chk CHECK (length(trim(subtype_code)) > 0),[m
+[1mdiff --git a/ai/client.go b/ai/client.go[m
+[1mindex e2c6bda..90cf6b5 100644[m
+[1m--- a/ai/client.go[m
+[1m+++ b/ai/client.go[m
+[36m@@ -45,7 +45,7 @@[m [mtype Client struct {[m
+ 	httpClient *http.Client[m
+ }[m
+ [m
+[31m-const defaultModel = "qwen/qwen3-235b-a22b-2507"[m
+[32m+[m[32mconst defaultModel = "gpt-4o-mini"[m
+ [m
+ // NewClient создаёт нового AI-клиента из переменных окружения[m
+ func NewClient() (*Client, error) {[m
+[1mdiff --git a/internal/config/config_test.go b/internal/config/config_test.go[m
+[1mindex e23a2e2..ae7797b 100644[m
+[1m--- a/internal/config/config_test.go[m
+[1m+++ b/internal/config/config_test.go[m
+[36m@@ -66,7 +66,7 @@[m [mfunc TestValidateServerOKWithAITunnelConfig(t *testing.T) {[m
+ 		AuthRateLimitRequests: 10,[m
+ 		AuthRateLimitWindow:   time.Minute,[m
+ 		AITunnelAPIKey:        "sk-aitunnel-test123",[m
+[31m-		AITunnelModel:         "qwen3-235b-a22b-2507",[m
+[32m+[m		[32mAITunnelModel:         "gpt-4o-mini",[m
+ 		AITunnelBaseURL:       "https://api.aitunnel.ru/v1",[m
+ 	}[m
+ [m
+[1mdiff --git a/internal/tasks/service.go b/internal/tasks/service.go[m
+[1mindex c0f2cfc..14cbd93 100644[m
+[1m--- a/internal/tasks/service.go[m
+[1m+++ b/internal/tasks/service.go[m
+[36m@@ -347,7 +347,7 @@[m [mfunc (s *Service) generateContent(ctx context.Context, target Target) (Generated[m
+ [m
+ 		log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=success",[m
+ 			target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds())[m
+[31m-		return content, "qwen", nil[m
+[32m+[m		[32mreturn content, "gpt-4o-mini", nil[m
+ 	}[m
+ [m
+ 	if RequiresVisualData(target) {[m
+[1mdiff --git a/internal/tasks/service_test.go b/internal/tasks/service_test.go[m
+[1mindex e87d975..bcd9d09 100644[m
+[1m--- a/internal/tasks/service_test.go[m
+[1m+++ b/internal/tasks/service_test.go[m
+[36m@@ -120,8 +120,8 @@[m [mfunc TestPrepareTaskRetriesAndUsesSecondValidVisualData(t *testing.T) {[m
+ 	if ai.generateCalls != 2 {[m
+ 		t.Fatalf("expected 2 AI calls, got %d", ai.generateCalls)[m
+ 	}[m
+[31m-	if task.Source != "qwen" {[m
+[31m-		t.Fatalf("expected qwen source, got %q", task.Source)[m
+[32m+[m	[32mif task.Source != "gpt-4o-mini" {[m
+[32m+[m		[32mt.Fatalf("expected gpt-4o-mini source, got %q", task.Source)[m
+ 	}[m
+ 	if repo.prepared.VisualData["type"] != string(VisualKindNumberLine) {[m
+ 		t.Fatalf("expected number_line visual_data, got %v", repo.prepared.VisualData["type"])[m
+[36m@@ -293,8 +293,8 @@[m [mfunc TestPrepareTaskStoresValidatedPreparedTask(t *testing.T) {[m
+ 	if prepared.ID == 0 {[m
+ 		t.Fatal("expected saved prepared task id")[m
+ 	}[m
+[31m-	if prepared.Source != "qwen" {[m
+[31m-		t.Fatalf("expected source qwen, got %q", prepared.Source)[m
+[32m+[m	[32mif prepared.Source != "gpt-4o-mini" {[m
+[32m+[m		[32mt.Fatalf("expected source gpt-4o-mini, got %q", prepared.Source)[m
+ 	}[m
+ 	if repo.prepared == nil {[m
+ 		t.Fatal("expected prepared task to be stored in repo")[m
+[36m@@ -536,6 +536,6 @@[m [mfunc validPreparedTask(id int64, question string) PreparedTask {[m
+ 		SelfCheck:       "check",[m
+ 		IsValid:         true,[m
+ 		ValidationNotes: "ok",[m
+[31m-		Source:          "qwen",[m
+[32m+[m		[32mSource:          "gpt-4o-mini",[m
+ 	}[m
+ }[m
+[1mdiff --git a/migrations/001_init.sql b/migrations/001_init.sql[m
+[1mindex 75087d2..1357b82 100644[m
+[1m--- a/migrations/001_init.sql[m
+[1m+++ b/migrations/001_init.sql[m
+[36m@@ -86,7 +86,7 @@[m [mCREATE TABLE IF NOT EXISTS generated_tasks ([m
+     is_valid BOOLEAN NOT NULL DEFAULT false,[m
+     validation_notes TEXT,[m
+     visual_data JSONB,[m
+[31m-    generation_source TEXT NOT NULL DEFAULT 'qwen',[m
+[32m+[m[32m    generation_source TEXT NOT NULL DEFAULT 'gpt-4o-mini',[m
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),[m
+     CONSTRAINT generated_tasks_mode_chk CHECK (mode IN ('weak', 'all', 'custom', 'diagnostic')),[m
+     CONSTRAINT generated_tasks_oge_number_chk CHECK (oge_number BETWEEN 6 AND 19),[m
+[1mdiff --git a/migrations/007_prepared_tasks.sql b/migrations/007_prepared_tasks.sql[m
+[1mindex abcad57..b2dffb7 100644[m
+[1m--- a/migrations/007_prepared_tasks.sql[m
+[1m+++ b/migrations/007_prepared_tasks.sql[m
+[36m@@ -17,7 +17,7 @@[m [mCREATE TABLE IF NOT EXISTS prepared_tasks ([m
+     validation_notes TEXT,[m
+     visual_data JSONB,[m
+     graphs JSONB,[m
+[31m-    generation_source TEXT NOT NULL DEFAULT 'qwen',[m
+[32m+[m[32m    generation_source TEXT NOT NULL DEFAULT 'gpt-4o-mini',[m
+     used BOOLEAN NOT NULL DEFAULT false,[m
+     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),[m
+     CONSTRAINT prepared_tasks_mode_chk CHECK (mode IN ('weak', 'all', 'custom', 'diagnostic')),[m

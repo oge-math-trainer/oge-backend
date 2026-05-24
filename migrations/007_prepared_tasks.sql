@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS prepared_tasks (
     validation_notes TEXT,
     visual_data JSONB,
     graphs JSONB,
-    generation_source TEXT NOT NULL DEFAULT 'qwen',
+    generation_source TEXT NOT NULL DEFAULT 'gpt-4o-mini',
     used BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT prepared_tasks_mode_chk CHECK (mode IN ('weak', 'all', 'custom', 'diagnostic')),

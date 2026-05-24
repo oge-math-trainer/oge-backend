@@ -120,8 +120,8 @@ func TestPrepareTaskRetriesAndUsesSecondValidVisualData(t *testing.T) {
 	if ai.generateCalls != 2 {
 		t.Fatalf("expected 2 AI calls, got %d", ai.generateCalls)
 	}
-	if task.Source != "qwen" {
-		t.Fatalf("expected qwen source, got %q", task.Source)
+	if task.Source != "gpt-4o-mini" {
+		t.Fatalf("expected gpt-4o-mini source, got %q", task.Source)
 	}
 	if repo.prepared.VisualData["type"] != string(VisualKindNumberLine) {
 		t.Fatalf("expected number_line visual_data, got %v", repo.prepared.VisualData["type"])
@@ -293,8 +293,8 @@ func TestPrepareTaskStoresValidatedPreparedTask(t *testing.T) {
 	if prepared.ID == 0 {
 		t.Fatal("expected saved prepared task id")
 	}
-	if prepared.Source != "qwen" {
-		t.Fatalf("expected source qwen, got %q", prepared.Source)
+	if prepared.Source != "gpt-4o-mini" {
+		t.Fatalf("expected source gpt-4o-mini, got %q", prepared.Source)
 	}
 	if repo.prepared == nil {
 		t.Fatal("expected prepared task to be stored in repo")
@@ -536,6 +536,6 @@ func validPreparedTask(id int64, question string) PreparedTask {
 		SelfCheck:       "check",
 		IsValid:         true,
 		ValidationNotes: "ok",
-		Source:          "qwen",
+		Source:          "gpt-4o-mini",
 	}
 }

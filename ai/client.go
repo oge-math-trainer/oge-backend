@@ -45,7 +45,7 @@ type Client struct {
 	httpClient *http.Client
 }
 
-const defaultModel = "qwen/qwen3-235b-a22b-2507"
+const defaultModel = "gpt-4o-mini"
 
 // NewClient создаёт нового AI-клиента из переменных окружения
 func NewClient() (*Client, error) {

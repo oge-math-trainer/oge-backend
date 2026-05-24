@@ -347,7 +347,7 @@ func (s *Service) generateContent(ctx context.Context, target Target) (Generated
 
 		log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=success",
 			target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds())
-		return content, "qwen", nil
+		return content, "gpt-4o-mini", nil
 	}
 
 	if RequiresVisualData(target) {
