@@ -217,6 +217,35 @@ func TestGenerateRejectsInvalidPreparedTaskAndFallsBackToOnDemandAI(t *testing.T
 	}
 }
 
+func TestGenerateSkipsDuplicatePreparedTaskForUser(t *testing.T) {
+	repo := &fakeRepo{
+		preparedQueue: []PreparedTask{
+			validPreparedTask(1, "duplicate question"),
+			validPreparedTask(2, "fresh question"),
+		},
+		createGeneratedErrs: []error{app.Conflict("duplicate generated task"), nil},
+	}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+	oge := 9
+
+	task, err := service.Generate(context.Background(), GenerateRequest{
+		UserID:      1,
+		Mode:        ModeCustom,
+		OgeNumber:   &oge,
+		SubtypeCode: "linear_equation",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if task.Question != "fresh question" {
+		t.Fatalf("expected second prepared task, got %q", task.Question)
+	}
+	if ai.generateCalls != 0 {
+		t.Fatalf("expected no on-demand AI calls, got %d", ai.generateCalls)
+	}
+}
+
 func TestPrepareTaskStoresValidatedPreparedTask(t *testing.T) {
 	repo := &fakeRepo{}
 	service := NewService(repo, &fakeAI{configured: true})
@@ -237,6 +266,20 @@ func TestPrepareTaskStoresValidatedPreparedTask(t *testing.T) {
 	}
 	if repo.prepared.OgeNumber != 9 || repo.prepared.SubtypeCode != "linear_equation" {
 		t.Fatalf("unexpected prepared task target: %+v", repo.prepared)
+	}
+}
+
+func TestPrepareTaskRetriesDuplicatePreparedContent(t *testing.T) {
+	repo := &fakeRepo{createPreparedErrs: []error{app.Conflict("duplicate prepared task"), nil}}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+
+	_, err := service.PrepareTask(context.Background(), Target{TaskTypeID: ptrInt64(7), OgeNumber: 9, SubtypeCode: "linear_equation"})
+	if err != nil {
+		t.Fatalf("PrepareTask returned error: %v", err)
+	}
+	if ai.generateCalls != 2 {
+		t.Fatalf("expected retry after duplicate prepared task, got %d calls", ai.generateCalls)
 	}
 }
 
@@ -280,10 +323,17 @@ func TestCheckStoresOriginalTaskMode(t *testing.T) {
 }
 
 type fakeRepo struct {
-	prepared    *PreparedTask
-	created     CreateTask
-	task        Task
-	attemptMode string
+	prepared            *PreparedTask
+	preparedQueue       []PreparedTask
+	created             CreateTask
+	task                Task
+	attemptMode         string
+	createGeneratedErrs []error
+	createPreparedErrs  []error
+}
+
+func (r *fakeRepo) TryAcquirePreparationLock(context.Context) (func(), bool, error) {
+	return func() {}, true, nil
 }
 
 func (r *fakeRepo) GetWeakTarget(context.Context, int64) (Target, error) {
@@ -295,6 +345,13 @@ func (r *fakeRepo) CountPreparedTasks(context.Context) (int, error) {
 }
 
 func (r *fakeRepo) CreatePreparedTask(_ context.Context, task CreateTask) (PreparedTask, error) {
+	if len(r.createPreparedErrs) > 0 {
+		err := r.createPreparedErrs[0]
+		r.createPreparedErrs = r.createPreparedErrs[1:]
+		if err != nil {
+			return PreparedTask{}, err
+		}
+	}
 	prepared := PreparedTask{
 		ID:              100,
 		Mode:            task.Mode,
@@ -316,6 +373,11 @@ func (r *fakeRepo) CreatePreparedTask(_ context.Context, task CreateTask) (Prepa
 }
 
 func (r *fakeRepo) GetPreparedTask(context.Context, Target) (PreparedTask, error) {
+	if len(r.preparedQueue) > 0 {
+		prepared := r.preparedQueue[0]
+		r.preparedQueue = r.preparedQueue[1:]
+		return prepared, nil
+	}
 	if r.prepared == nil {
 		return PreparedTask{}, app.NotFound("Готовая задача не найдена")
 	}
@@ -337,6 +399,13 @@ func (r *fakeRepo) ResolveTarget(_ context.Context, target Target) (Target, erro
 }
 
 func (r *fakeRepo) CreateGeneratedTask(_ context.Context, task CreateTask) (Task, error) {
+	if len(r.createGeneratedErrs) > 0 {
+		err := r.createGeneratedErrs[0]
+		r.createGeneratedErrs = r.createGeneratedErrs[1:]
+		if err != nil {
+			return Task{}, err
+		}
+	}
 	r.created = task
 	return Task{
 		ID:            100,
@@ -418,4 +487,20 @@ func validGeneratedContent(visualData VisualData) GeneratedContent {
 
 func ptrInt64(value int64) *int64 {
 	return &value
+}
+
+func validPreparedTask(id int64, question string) PreparedTask {
+	return PreparedTask{
+		ID:              id,
+		Mode:            ModeCustom,
+		OgeNumber:       9,
+		SubtypeCode:     "linear_equation",
+		Question:        question,
+		CorrectAnswer:   "3",
+		SolutionSteps:   []string{"step 1", "step 2", "step 3"},
+		SelfCheck:       "check",
+		IsValid:         true,
+		ValidationNotes: "ok",
+		Source:          "qwen",
+	}
 }

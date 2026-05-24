@@ -22,6 +22,8 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+const preparedTasksWorkerLockKey int64 = 2026052401
+
 func New(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -47,6 +49,29 @@ func (s *Store) Ping(ctx context.Context) error {
 		return app.DBUnavailable(err)
 	}
 	return nil
+}
+
+func (s *Store) TryAcquirePreparationLock(ctx context.Context) (func(), bool, error) {
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return nil, false, app.Internal(err)
+	}
+
+	var locked bool
+	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, preparedTasksWorkerLockKey).Scan(&locked); err != nil {
+		conn.Release()
+		return nil, false, app.Internal(err)
+	}
+	if !locked {
+		conn.Release()
+		return nil, false, nil
+	}
+
+	release := func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, preparedTasksWorkerLockKey)
+		conn.Release()
+	}
+	return release, true, nil
 }
 
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (auth.User, error) {
@@ -248,7 +273,16 @@ func (s *Store) CreatePreparedTask(ctx context.Context, task tasks.CreateTask) (
 			generation_source,
 			used
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, false)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, false
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM prepared_tasks
+			WHERE used = false
+				AND oge_number = $3
+				AND subtype_code = $4
+				AND md5(regexp_replace(lower(trim(question)), '\s+', ' ', 'g')) =
+				    md5(regexp_replace(lower(trim($5::text)), '\s+', ' ', 'g'))
+		)
 		RETURNING id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 			COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''), is_valid,
 			COALESCE(validation_notes, ''), generation_source,
@@ -256,7 +290,14 @@ func (s *Store) CreatePreparedTask(ctx context.Context, task tasks.CreateTask) (
 	`, task.Mode, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, task.Question, task.CorrectAnswer,
 		string(steps), task.SelfCheck, task.IsValid, task.ValidationNotes, visualDataJSON, graphsJSON, task.Source)
 
-	return scanPreparedTask(row)
+	prepared, err := scanPreparedTask(row)
+	if err != nil {
+		if isAppCode(err, app.CodeNotFound) || isUniqueViolation(err) {
+			return tasks.PreparedTask{}, app.Conflict("duplicate prepared task")
+		}
+		return tasks.PreparedTask{}, err
+	}
+	return prepared, nil
 }
 
 func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) (tasks.Task, error) {
@@ -298,7 +339,17 @@ func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) 
 			visual_data,
 			graphs
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM generated_tasks
+			WHERE user_id = $1
+				AND mode = $2
+				AND oge_number = $4
+				AND subtype_code = $5
+				AND md5(regexp_replace(lower(trim(question)), '\s+', ' ', 'g')) =
+				    md5(regexp_replace(lower(trim($6::text)), '\s+', ' ', 'g'))
+		)
 		RETURNING id, user_id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 		          COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''),
 		          is_valid, COALESCE(validation_notes, ''), generation_source,
@@ -306,7 +357,14 @@ func (s *Store) CreateGeneratedTask(ctx context.Context, task tasks.CreateTask) 
 	`, task.UserID, task.Mode, task.TaskTypeID, task.OgeNumber, task.SubtypeCode, task.Question, task.CorrectAnswer,
 		string(steps), task.SelfCheck, task.IsValid, task.ValidationNotes, task.Source, visualDataJSON, graphsJSON)
 
-	return scanGeneratedTask(row)
+	generated, err := scanGeneratedTask(row)
+	if err != nil {
+		if isAppCode(err, app.CodeNotFound) {
+			return tasks.Task{}, app.Conflict("duplicate generated task")
+		}
+		return tasks.Task{}, err
+	}
+	return generated, nil
 }
 
 func (s *Store) GetGeneratedTaskForUser(ctx context.Context, userID, id int64) (tasks.Task, error) {
@@ -783,4 +841,9 @@ func ptrFromNullInt64(value sql.NullInt64) *int64 {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+func isAppCode(err error, code string) bool {
+	var appErr *app.Error
+	return errors.As(err, &appErr) && appErr.Code == code
 }

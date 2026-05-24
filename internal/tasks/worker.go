@@ -41,6 +41,16 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 func (w *Worker) fillPreparedTasks(ctx context.Context) error {
+	release, locked, err := w.repo.TryAcquirePreparationLock(ctx)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		log.Print("prepared task worker: another instance is already filling tasks; skipping this interval")
+		return nil
+	}
+	defer release()
+
 	failures := 0
 	for {
 		if err := ctx.Err(); err != nil {

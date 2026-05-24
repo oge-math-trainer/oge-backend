@@ -58,6 +58,42 @@ func TestValidateAnswerFormats(t *testing.T) {
 	}
 }
 
+func TestDecodeAIJSONRepairsLatexBackslashes(t *testing.T) {
+	raw := `{
+		"question": "Решите уравнение \(x^2 - 5x + 6 = 0\).",
+		"correct_answer": "2",
+		"solution_steps": ["Используем формулу \frac{-b \pm \sqrt{D}}{2a}.", "Получаем корни 2 и 3.", "По условию записываем 2."],
+		"self_check": "Подставьте \(x=2\).",
+		"is_valid": true,
+		"validation_notes": ""
+	}`
+
+	var content tasks.GeneratedContent
+	if err := decodeAIJSON(raw, &content); err != nil {
+		t.Fatalf("expected repaired JSON to decode: %v", err)
+	}
+	if !strings.Contains(content.Question, `\(`) {
+		t.Fatalf("expected LaTeX delimiters to survive, got %q", content.Question)
+	}
+	if !strings.Contains(content.SolutionSteps[0], `\frac`) {
+		t.Fatalf("expected LaTeX command to survive, got %q", content.SolutionSteps[0])
+	}
+}
+
+func TestDecodeAIJSONRepairsLiteralNewlineInString(t *testing.T) {
+	raw := "{\n\"hint\":\"Сначала перенесите\nвсе слагаемые в одну часть.\"\n}"
+
+	var parsed struct {
+		Hint string `json:"hint"`
+	}
+	if err := decodeAIJSON(raw, &parsed); err != nil {
+		t.Fatalf("expected repaired JSON to decode: %v", err)
+	}
+	if strings.Contains(parsed.Hint, "\n") {
+		t.Fatalf("expected literal newline to be normalized, got %q", parsed.Hint)
+	}
+}
+
 func TestValidateGeneratedTaskVisualRequirements(t *testing.T) {
 	tests := []struct {
 		name    string

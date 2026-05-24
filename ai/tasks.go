@@ -413,10 +413,8 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 			continue
 		}
 
-		// raw = sanitizeAIResponse(raw)
-
 		var result tasks.GeneratedContent
-		if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		if err := decodeAIJSON(raw, &result); err != nil {
 			lastErr = fmt.Errorf("could not parse AI JSON: %w", err)
 			continue
 		}
@@ -441,6 +439,91 @@ func errorText(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+func decodeAIJSON(raw string, dest any) error {
+	cleaned := extractJSONObject(raw)
+	if err := json.Unmarshal([]byte(cleaned), dest); err == nil {
+		return nil
+	}
+	return json.Unmarshal([]byte(repairJSONStringEscapes(cleaned)), dest)
+}
+
+func extractJSONObject(raw string) string {
+	raw = strings.TrimSpace(strings.TrimPrefix(raw, "\ufeff"))
+	if strings.HasPrefix(raw, "```") {
+		lines := strings.Split(raw, "\n")
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[0]), "```") {
+			lines = lines[1:]
+		}
+		if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+			lines = lines[:len(lines)-1]
+		}
+		raw = strings.TrimSpace(strings.Join(lines, "\n"))
+	}
+
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start >= 0 && end > start {
+		return strings.TrimSpace(raw[start : end+1])
+	}
+	return raw
+}
+
+func repairJSONStringEscapes(raw string) string {
+	var b strings.Builder
+	b.Grow(len(raw) + 16)
+
+	inString := false
+	for i := 0; i < len(raw); i++ {
+		ch := raw[i]
+		if !inString {
+			b.WriteByte(ch)
+			if ch == '"' {
+				inString = true
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			b.WriteByte(ch)
+			inString = false
+		case '\\':
+			if i+1 >= len(raw) {
+				b.WriteString(`\\`)
+				continue
+			}
+			next := raw[i+1]
+			if next == '"' || next == '\\' || next == '/' || validUnicodeEscape(raw, i+1) {
+				b.WriteByte(ch)
+				b.WriteByte(next)
+				i++
+				continue
+			}
+			b.WriteString(`\\`)
+		case '\n', '\r':
+			b.WriteByte(' ')
+		case '\t':
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(ch)
+		}
+	}
+
+	return b.String()
+}
+
+func validUnicodeEscape(raw string, escapeIndex int) bool {
+	if escapeIndex >= len(raw) || raw[escapeIndex] != 'u' || escapeIndex+4 >= len(raw) {
+		return false
+	}
+	for _, ch := range raw[escapeIndex+1 : escapeIndex+5] {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') && (ch < 'A' || ch > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func normalizeGeneratedContent(result *tasks.GeneratedContent) {
@@ -561,10 +644,8 @@ Rules:
 	if err != nil {
 		return tasks.CheckResult{}, fmt.Errorf("CheckAnswer: %w", err)
 	}
-	// raw = sanitizeAIResponse(raw)
-
 	var result tasks.CheckResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := decodeAIJSON(raw, &result); err != nil {
 		return tasks.CheckResult{}, fmt.Errorf("CheckAnswer: could not parse AI JSON: %w", err)
 	}
 
@@ -598,12 +679,10 @@ Rules:
 	if err != nil {
 		return tasks.HintResult{}, fmt.Errorf("Hint: %w", err)
 	}
-	// raw = sanitizeAIResponse(raw)
-
 	var parsed struct {
 		Hint string `json:"hint"`
 	}
-	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+	if err := decodeAIJSON(raw, &parsed); err != nil {
 		return tasks.HintResult{}, fmt.Errorf("Hint: could not parse AI JSON: %w", err)
 	}
 
@@ -638,10 +717,8 @@ Rules:
 	if err != nil {
 		return tasks.ExplainResult{}, fmt.Errorf("Explain: %w", err)
 	}
-	// raw = sanitizeAIResponse(raw)
-
 	var result tasks.ExplainResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := decodeAIJSON(raw, &result); err != nil {
 		return tasks.ExplainResult{}, fmt.Errorf("Explain: could not parse AI JSON: %w", err)
 	}
 
@@ -670,10 +747,8 @@ func (c *Client) AnalyzeDiagnostic(ctx context.Context, answers []diagnostic.Ans
 	if err != nil {
 		return diagnostic.Analysis{}, fmt.Errorf("AnalyzeDiagnostic: %w", err)
 	}
-	// raw = sanitizeAIResponse(raw)
-
 	var result diagnostic.Analysis
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	if err := decodeAIJSON(raw, &result); err != nil {
 		return diagnostic.Analysis{}, fmt.Errorf("AnalyzeDiagnostic: could not parse AI JSON: %w", err)
 	}
 	result.Summary = strings.TrimSpace(result.Summary)

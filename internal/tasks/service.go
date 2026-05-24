@@ -146,6 +146,7 @@ type ExplainResult struct {
 }
 
 type Repository interface {
+	TryAcquirePreparationLock(ctx context.Context) (func(), bool, error)
 	GetWeakTarget(ctx context.Context, userID int64) (Target, error)
 	GetRandomTaskType(ctx context.Context) (Target, error)
 	GetPreparationTarget(ctx context.Context, minReady int) (Target, int, error)
@@ -182,8 +183,21 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		return Task{}, err
 	}
 
-	preparedTask, err := s.repo.GetPreparedTask(ctx, target)
-	if err == nil {
+	const maxPreparedAttempts = 5
+	for attempt := 1; attempt <= maxPreparedAttempts; attempt++ {
+		preparedTask, err := s.repo.GetPreparedTask(ctx, target)
+		if err != nil {
+			var appErr *app.Error
+			if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
+				log.Printf("task generate cache miss: user_id=%d mode=%s target=%d/%s",
+					req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode)
+				return s.generateOnDemand(ctx, req, target)
+			}
+			log.Printf("task generate cache error: user_id=%d mode=%s target=%d/%s error=%v",
+				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, err)
+			return Task{}, err
+		}
+
 		log.Printf("task generate cache hit: user_id=%d mode=%s target=%d/%s prepared_id=%d",
 			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID)
 		content := GeneratedContent{
@@ -206,27 +220,45 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID, err)
 			return s.generateOnDemand(ctx, req, target)
 		}
-		return s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), preparedTarget, content, preparedTask.Source))
+
+		task, err := s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), preparedTarget, content, preparedTask.Source))
+		if err == nil {
+			return task, nil
+		}
+		if isAppConflict(err) {
+			log.Printf("task generate duplicate skipped: user_id=%d mode=%s target=%d/%s prepared_id=%d attempt=%d/%d",
+				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID, attempt, maxPreparedAttempts)
+			continue
+		}
+		return Task{}, err
 	}
-	var appErr *app.Error
-	if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
-		log.Printf("task generate cache miss: user_id=%d mode=%s target=%d/%s",
-			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode)
-		return s.generateOnDemand(ctx, req, target)
-	}
-	log.Printf("task generate cache error: user_id=%d mode=%s target=%d/%s error=%v",
-		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, err)
-	return Task{}, err
+
+	log.Printf("task generate cache exhausted by duplicates: user_id=%d mode=%s target=%d/%s attempts=%d",
+		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, maxPreparedAttempts)
+	return s.generateOnDemand(ctx, req, target)
 }
 
 func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, target Target) (Task, error) {
-	content, source, err := s.generateContent(ctx, target)
-	if err != nil {
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		content, source, err := s.generateContent(ctx, target)
+		if err != nil {
+			return Task{}, err
+		}
+		log.Printf("task generate on-demand: user_id=%d mode=%s target=%d/%s source=%s attempt=%d/%d",
+			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, source, attempt, maxAttempts)
+		task, err := s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), target, content, source))
+		if err == nil {
+			return task, nil
+		}
+		if isAppConflict(err) {
+			log.Printf("task generate on-demand duplicate skipped: user_id=%d mode=%s target=%d/%s attempt=%d/%d",
+				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, attempt, maxAttempts)
+			continue
+		}
 		return Task{}, err
 	}
-	log.Printf("task generate on-demand: user_id=%d mode=%s target=%d/%s source=%s",
-		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, source)
-	return s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), target, content, source))
+	return Task{}, app.TaskUnavailable("Не удалось сгенерировать новую уникальную задачу")
 }
 
 func createGeneratedTask(userID int64, mode string, target Target, content GeneratedContent, source string) CreateTask {
@@ -249,29 +281,38 @@ func createGeneratedTask(userID int64, mode string, target Target, content Gener
 }
 
 func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask, error) {
-	content, source, err := s.generateContent(ctx, target)
-	if err != nil {
+	const maxAttempts = 5
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		content, source, err := s.generateContent(ctx, target)
+		if err != nil {
+			return PreparedTask{}, err
+		}
+		prepared, err := s.repo.CreatePreparedTask(ctx, CreateTask{
+			Mode:            ModeCustom,
+			TaskTypeID:      target.TaskTypeID,
+			OgeNumber:       target.OgeNumber,
+			SubtypeCode:     target.SubtypeCode,
+			Question:        strings.TrimSpace(content.Question),
+			CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
+			SolutionSteps:   content.SolutionSteps,
+			SelfCheck:       strings.TrimSpace(content.SelfCheck),
+			IsValid:         content.IsValid,
+			ValidationNotes: strings.TrimSpace(content.ValidationNotes),
+			Source:          source,
+			VisualData:      content.VisualData,
+			Graphs:          content.Graphs,
+		})
+		if err == nil {
+			return prepared, nil
+		}
+		if isAppConflict(err) {
+			log.Printf("prepared task duplicate skipped: target=%d/%s attempt=%d/%d",
+				target.OgeNumber, target.SubtypeCode, attempt, maxAttempts)
+			continue
+		}
 		return PreparedTask{}, err
 	}
-	prepared, err := s.repo.CreatePreparedTask(ctx, CreateTask{
-		Mode:            ModeCustom,
-		TaskTypeID:      target.TaskTypeID,
-		OgeNumber:       target.OgeNumber,
-		SubtypeCode:     target.SubtypeCode,
-		Question:        strings.TrimSpace(content.Question),
-		CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
-		SolutionSteps:   content.SolutionSteps,
-		SelfCheck:       strings.TrimSpace(content.SelfCheck),
-		IsValid:         content.IsValid,
-		ValidationNotes: strings.TrimSpace(content.ValidationNotes),
-		Source:          source,
-		VisualData:      content.VisualData,
-		Graphs:          content.Graphs,
-	})
-	if err != nil {
-		return PreparedTask{}, err
-	}
-	return prepared, nil
+	return PreparedTask{}, app.TaskUnavailable("Не удалось подготовить уникальную задачу")
 }
 
 func (s *Service) generateContent(ctx context.Context, target Target) (GeneratedContent, string, error) {
@@ -418,6 +459,11 @@ func (s *Service) resolveTarget(ctx context.Context, req GenerateRequest) (Targe
 func isAppNotFound(err error) bool {
 	var appErr *app.Error
 	return errors.As(err, &appErr) && appErr.Code == app.CodeNotFound
+}
+
+func isAppConflict(err error) bool {
+	var appErr *app.Error
+	return errors.As(err, &appErr) && appErr.Code == app.CodeConflict
 }
 
 func storedMode(req GenerateRequest) string {
