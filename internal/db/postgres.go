@@ -179,14 +179,14 @@ func (s *Store) ResolveTarget(ctx context.Context, target tasks.Target) (tasks.T
 
 func (s *Store) GetPreparedTask(ctx context.Context, target tasks.Target) (tasks.PreparedTask, error) {
 	row := s.pool.QueryRow(ctx, `
-		UPDATE prepared_tasks
-		SET used = true
+		DELETE FROM prepared_tasks
 		WHERE id = (
 			SELECT id
 			FROM prepared_tasks
 			WHERE used = false AND oge_number = $1 AND subtype_code = $2
 			ORDER BY created_at ASC
 			LIMIT 1
+			FOR UPDATE SKIP LOCKED
 		)
 		RETURNING id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 			COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''), is_valid,
