@@ -59,6 +59,18 @@ func main() {
 	diagnosticService := diagnostic.NewService(store, taskService, aiClient)
 	progressService := progress.NewService(store)
 
+	if aiClient.IsConfigured() && cfg.PreparedTasksMin > 0 {
+		worker := tasks.NewWorker(taskService, store, cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
+		go func() {
+			log.Printf("embedded prepared task worker starting: min=%d interval=%s", cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
+			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("embedded prepared task worker stopped: %v", err)
+			}
+		}()
+	} else {
+		log.Print("embedded prepared task worker disabled: AI client is not configured or PREPARED_TASKS_MIN <= 0")
+	}
+
 	router := api.NewRouter(api.Dependencies{
 		Auth:                  authService,
 		Tasks:                 taskService,
