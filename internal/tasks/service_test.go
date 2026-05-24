@@ -8,27 +8,26 @@ import (
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
-func TestGenerateWithoutPreparedTaskReturnsTaskUnavailable(t *testing.T) {
+func TestGenerateWithoutPreparedTaskFallsBackToOnDemandAI(t *testing.T) {
 	repo := &fakeRepo{}
-	ai := &fakeAI{configured: false}
+	ai := &fakeAI{configured: true}
 	service := NewService(repo, ai)
 	oge := 9
 
-	_, err := service.Generate(context.Background(), GenerateRequest{
+	task, err := service.Generate(context.Background(), GenerateRequest{
 		UserID:      1,
 		Mode:        ModeCustom,
 		OgeNumber:   &oge,
 		SubtypeCode: "linear_equation",
 	})
-	if err == nil {
-		t.Fatal("expected error")
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
 	}
-	var appErr *app.Error
-	if !errors.As(err, &appErr) || appErr.Code != app.CodeTaskUnavailable {
-		t.Fatalf("expected task_unavailable, got %v", err)
+	if ai.generateCalls != 1 {
+		t.Fatalf("expected one AI call, got %d", ai.generateCalls)
 	}
-	if ai.generateCalls != 0 {
-		t.Fatalf("expected no AI calls, got %d", ai.generateCalls)
+	if task.Question != "generated" {
+		t.Fatalf("expected on-demand generated task, got %q", task.Question)
 	}
 }
 
@@ -179,6 +178,42 @@ func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
 	}
 	if repo.created.UserID != 1 {
 		t.Fatalf("expected created user id 1, got %d", repo.created.UserID)
+	}
+}
+
+func TestGenerateRejectsInvalidPreparedTaskAndFallsBackToOnDemandAI(t *testing.T) {
+	prepared := &PreparedTask{
+		ID:              123,
+		Mode:            ModeCustom,
+		OgeNumber:       9,
+		SubtypeCode:     "linear_equation",
+		Question:        `\begin{tikzpicture}\draw (0,0) -- (1,0);\end{tikzpicture}`,
+		CorrectAnswer:   "3",
+		SolutionSteps:   []string{"step 1", "step 2", "step 3"},
+		SelfCheck:       "check",
+		IsValid:         true,
+		ValidationNotes: "ok",
+		Source:          "prepared",
+	}
+	repo := &fakeRepo{prepared: prepared}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+	oge := 9
+
+	task, err := service.Generate(context.Background(), GenerateRequest{
+		UserID:      1,
+		Mode:        ModeCustom,
+		OgeNumber:   &oge,
+		SubtypeCode: "linear_equation",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if ai.generateCalls != 1 {
+		t.Fatalf("expected one AI call after rejecting prepared task, got %d", ai.generateCalls)
+	}
+	if task.Question != "generated" {
+		t.Fatalf("expected on-demand generated task, got %q", task.Question)
 	}
 }
 
@@ -338,6 +373,7 @@ func (r *fakeRepo) UpdateProgress(context.Context, int64, Task, bool) error {
 type fakeAI struct {
 	configured    bool
 	generated     []GeneratedContent
+	generateErr   error
 	generateCalls int
 }
 
@@ -347,6 +383,9 @@ func (f fakeAI) IsConfigured() bool {
 
 func (f *fakeAI) GenerateTask(context.Context, Target) (GeneratedContent, error) {
 	f.generateCalls++
+	if f.generateErr != nil {
+		return GeneratedContent{}, f.generateErr
+	}
 	if len(f.generated) >= f.generateCalls {
 		return f.generated[f.generateCalls-1], nil
 	}

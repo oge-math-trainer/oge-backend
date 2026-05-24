@@ -3,7 +3,6 @@ package tasks
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
@@ -60,16 +59,26 @@ func (w *Worker) fillPreparedTasks(ctx context.Context) error {
 
 		log.Printf("prepared task worker: target %d/%s has %d/%d ready tasks",
 			target.OgeNumber, target.SubtypeCode, ready, w.minReady)
-		prepared, err := w.service.PrepareTask(ctx, target)
-		if err != nil {
-			log.Printf("failed to prepare task for target %d/%s: %v", target.OgeNumber, target.SubtypeCode, err)
-			failures++
-			if failures >= 5 {
-				return fmt.Errorf("too many preparation failures")
+
+		for ready < w.minReady {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			continue
+
+			prepared, err := w.service.PrepareTask(ctx, target)
+			if err != nil {
+				log.Printf("failed to prepare task for target %d/%s: %v", target.OgeNumber, target.SubtypeCode, err)
+				failures++
+				if failures >= 5 {
+					log.Printf("prepared task worker: pausing fill after %d consecutive preparation failures; will retry on next interval", failures)
+					return nil
+				}
+				continue
+			}
+			failures = 0
+			ready++
+			log.Printf("prepared task created: id=%d target=%d/%s source=%s ready=%d/%d",
+				prepared.ID, prepared.OgeNumber, prepared.SubtypeCode, prepared.Source, ready, w.minReady)
 		}
-		failures = 0
-		log.Printf("prepared task created: id=%d target=%d/%s source=%s", prepared.ID, prepared.OgeNumber, prepared.SubtypeCode, prepared.Source)
 	}
 }

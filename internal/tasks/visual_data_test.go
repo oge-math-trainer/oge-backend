@@ -1,6 +1,9 @@
 package tasks
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateGraphVisualData(t *testing.T) {
 	data := VisualData{
@@ -146,5 +149,22 @@ func TestOge19DoesNotRequireVisualData(t *testing.T) {
 
 	if RequiresVisualData(target) {
 		t.Fatal("expected OGE 19 to work without visual_data")
+	}
+}
+
+func TestFallbackGeometryContentMatchesOge17RectangleVisual(t *testing.T) {
+	content := FallbackGeneratedContent(Target{OgeNumber: 17, SubtypeCode: "quad_rectangle"}, nil)
+
+	if !strings.Contains(strings.ToLower(content.Question), "прямоугольник") {
+		t.Fatalf("expected rectangle fallback question, got %q", content.Question)
+	}
+	if strings.Contains(strings.ToLower(content.Question), "треугольник") {
+		t.Fatalf("fallback question should not mention triangle for OGE 17: %q", content.Question)
+	}
+	if content.CorrectAnswer != "20" {
+		t.Fatalf("expected rectangle perimeter answer 20, got %q", content.CorrectAnswer)
+	}
+	if got := content.VisualData["shape"]; got != "rectangle" {
+		t.Fatalf("expected rectangle visual shape, got %v", got)
 	}
 }

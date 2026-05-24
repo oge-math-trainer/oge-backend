@@ -136,15 +136,7 @@ func FallbackGeneratedContent(target Target, reason error) GeneratedContent {
 			VisualData:      FallbackVisualData(target),
 		}
 	case VisualKindGeometry:
-		return GeneratedContent{
-			Question:        "В прямоугольном треугольнике ABC катеты AB = 6 и AC = 8. Найдите гипотенузу BC.",
-			CorrectAnswer:   "10",
-			SolutionSteps:   []string{"По теореме Пифагора BC^2 = AB^2 + AC^2.", "BC^2 = 6^2 + 8^2 = 36 + 64 = 100.", "BC = 10."},
-			SelfCheck:       "Тройка 6, 8, 10 является пифагоровой.",
-			IsValid:         true,
-			ValidationNotes: note,
-			VisualData:      FallbackVisualData(target),
-		}
+		return fallbackGeometryGeneratedContent(target, note)
 	case VisualKindGrid:
 		return GeneratedContent{
 			Question:        "На клетчатой бумаге отмечены точки A(1; 1) и B(4; 5). Найдите длину отрезка AB, если сторона клетки равна 1.",
@@ -163,6 +155,63 @@ func FallbackGeneratedContent(target Target, reason error) GeneratedContent {
 			SelfCheck:       "3 + 2 = 5.",
 			IsValid:         true,
 			ValidationNotes: note,
+		}
+	}
+}
+
+func fallbackGeometryGeneratedContent(target Target, note string) GeneratedContent {
+	subtype := strings.ToLower(strings.TrimSpace(target.SubtypeCode))
+
+	switch {
+	case target.OgeNumber == 16 && strings.Contains(subtype, "tangent"):
+		return GeneratedContent{
+			Question:        "Из точки A к окружности с центром O проведены две касательные AB и AC. Длина AB равна 7. Найдите длину AC.",
+			CorrectAnswer:   "7",
+			SolutionSteps:   []string{"Касательные, проведенные из одной точки к окружности, равны.", "Значит, AB = AC.", "Так как AB = 7, то AC = 7."},
+			SelfCheck:       "Отрезки касательных из одной внешней точки имеют одинаковую длину.",
+			IsValid:         true,
+			ValidationNotes: note,
+			VisualData:      FallbackVisualData(target),
+		}
+	case target.OgeNumber == 16:
+		return GeneratedContent{
+			Question:        "В окружности с центром O радиус OA равен 3. Найдите диаметр этой окружности.",
+			CorrectAnswer:   "6",
+			SolutionSteps:   []string{"Диаметр окружности в два раза больше радиуса.", "Радиус OA равен 3.", "Диаметр равен 2 * 3 = 6."},
+			SelfCheck:       "Если радиус 3, то полный диаметр состоит из двух радиусов.",
+			IsValid:         true,
+			ValidationNotes: note,
+			VisualData:      FallbackVisualData(target),
+		}
+	case target.OgeNumber == 17 && strings.Contains(subtype, "trapezoid"):
+		return GeneratedContent{
+			Question:        "В трапеции ABCD основания AB = 8 и CD = 4, высота равна 3. Найдите площадь трапеции.",
+			CorrectAnswer:   "18",
+			SolutionSteps:   []string{"Площадь трапеции равна полусумме оснований, умноженной на высоту.", "Полусумма оснований: (8 + 4) / 2 = 6.", "Площадь равна 6 * 3 = 18."},
+			SelfCheck:       "Основания 8 и 4, высота 3, значит площадь (8 + 4) * 3 / 2 = 18.",
+			IsValid:         true,
+			ValidationNotes: note,
+			VisualData:      FallbackVisualData(target),
+		}
+	case target.OgeNumber == 17:
+		return GeneratedContent{
+			Question:        "В прямоугольнике ABCD стороны AB = 6 и BC = 4. Найдите периметр прямоугольника.",
+			CorrectAnswer:   "20",
+			SolutionSteps:   []string{"Периметр прямоугольника равен удвоенной сумме соседних сторон.", "AB + BC = 6 + 4 = 10.", "Периметр равен 2 * 10 = 20."},
+			SelfCheck:       "У прямоугольника противоположные стороны равны, поэтому 6 + 4 + 6 + 4 = 20.",
+			IsValid:         true,
+			ValidationNotes: note,
+			VisualData:      FallbackVisualData(target),
+		}
+	default:
+		return GeneratedContent{
+			Question:        "В прямоугольном треугольнике ABC катеты AB = 6 и AC = 8. Найдите гипотенузу BC.",
+			CorrectAnswer:   "10",
+			SolutionSteps:   []string{"По теореме Пифагора BC^2 = AB^2 + AC^2.", "BC^2 = 6^2 + 8^2 = 36 + 64 = 100.", "BC = 10."},
+			SelfCheck:       "Тройка 6, 8, 10 является пифагоровой.",
+			IsValid:         true,
+			ValidationNotes: note,
+			VisualData:      FallbackVisualData(target),
 		}
 	}
 }
@@ -274,9 +323,9 @@ func fallbackGeometryVisualData(target Target) VisualData {
 			},
 			"labels": map[string]any{"A": "A", "B": "B", "C": "C", "D": "D"},
 			"segments": []any{
-				map[string]any{"from": "A", "to": "B"},
+				map[string]any{"from": "A", "to": "B", "label": "8"},
 				map[string]any{"from": "B", "to": "C"},
-				map[string]any{"from": "C", "to": "D"},
+				map[string]any{"from": "C", "to": "D", "label": "4"},
 				map[string]any{"from": "D", "to": "A"},
 			},
 		}
@@ -292,10 +341,10 @@ func fallbackGeometryVisualData(target Target) VisualData {
 			},
 			"labels": map[string]any{"A": "A", "B": "B", "C": "C", "D": "D"},
 			"segments": []any{
-				map[string]any{"from": "A", "to": "B"},
-				map[string]any{"from": "B", "to": "C"},
-				map[string]any{"from": "C", "to": "D"},
-				map[string]any{"from": "D", "to": "A"},
+				map[string]any{"from": "A", "to": "B", "label": "6"},
+				map[string]any{"from": "B", "to": "C", "label": "4"},
+				map[string]any{"from": "C", "to": "D", "label": "6"},
+				map[string]any{"from": "D", "to": "A", "label": "4"},
 			},
 		}
 	default:
@@ -305,8 +354,8 @@ func fallbackGeometryVisualData(target Target) VisualData {
 			"vertices": []any{vertex("A", 0, 0), vertex("B", 6, 0), vertex("C", 0, 8)},
 			"labels":   map[string]any{"A": "A", "B": "B", "C": "C"},
 			"segments": []any{
-				map[string]any{"from": "A", "to": "B"},
-				map[string]any{"from": "A", "to": "C"},
+				map[string]any{"from": "A", "to": "B", "label": "6"},
+				map[string]any{"from": "A", "to": "C", "label": "8"},
 				map[string]any{"from": "B", "to": "C"},
 			},
 		}

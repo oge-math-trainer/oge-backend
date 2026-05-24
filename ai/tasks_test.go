@@ -32,6 +32,16 @@ func TestBuildGeneratePromptUsesSeparateGraphPlots(t *testing.T) {
 	}
 }
 
+func TestBuildGeneratePromptForbidsDrawingLatexInText(t *testing.T) {
+	prompt := buildGeneratePrompt(tasks.Target{OgeNumber: 7, SubtypeCode: "numberline_compare"}, "")
+
+	for _, token := range []string{"TikZ", "PGFPlots", `\draw`, "visual_data"} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected prompt to mention %q", token)
+		}
+	}
+}
+
 func TestValidateAnswerFormats(t *testing.T) {
 	valid := []string{"12", "-3", "4,5", "231"}
 	for _, answer := range valid {

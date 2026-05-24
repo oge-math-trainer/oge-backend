@@ -277,6 +277,7 @@ Strict answer rules:
 Text rules:
 - All user-facing text must be in Russian.
 - Use LaTeX.
+- Do not put TikZ, PGFPlots, \draw, \node, \foreach, \begin{axis}, or other drawing code in question, solution_steps, or self_check. Diagrams must be described only in visual_data.
 - Create a new task in the same format; do not copy SDAM GIA examples verbatim.
 
 %s%s`,
@@ -470,6 +471,9 @@ func validateGeneratedTask(target tasks.Target, result *tasks.GeneratedContent) 
 	}
 	if !result.IsValid {
 		return fmt.Errorf("is_valid=false")
+	}
+	if err := tasks.ValidateUserFacingText(*result); err != nil {
+		return err
 	}
 	// if containsForbiddenMathSyntax(result.Question) || containsForbiddenMathSyntax(strings.Join(result.SolutionSteps, " ")) {
 	// 	return fmt.Errorf("text contains LaTeX or forbidden math syntax")

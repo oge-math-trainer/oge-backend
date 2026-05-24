@@ -186,32 +186,66 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 	if err == nil {
 		log.Printf("task generate cache hit: user_id=%d mode=%s target=%d/%s prepared_id=%d",
 			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID)
-		return s.repo.CreateGeneratedTask(ctx, CreateTask{
-			UserID:          req.UserID,
-			Mode:            storedMode(req),
-			TaskTypeID:      preparedTask.TaskTypeID,
-			OgeNumber:       preparedTask.OgeNumber,
-			SubtypeCode:     preparedTask.SubtypeCode,
-			Question:        strings.TrimSpace(preparedTask.Question),
-			CorrectAnswer:   strings.TrimSpace(preparedTask.CorrectAnswer),
+		content := GeneratedContent{
+			Question:        preparedTask.Question,
+			CorrectAnswer:   preparedTask.CorrectAnswer,
 			SolutionSteps:   preparedTask.SolutionSteps,
-			SelfCheck:       strings.TrimSpace(preparedTask.SelfCheck),
+			SelfCheck:       preparedTask.SelfCheck,
 			IsValid:         preparedTask.IsValid,
-			ValidationNotes: strings.TrimSpace(preparedTask.ValidationNotes),
-			Source:          preparedTask.Source,
+			ValidationNotes: preparedTask.ValidationNotes,
 			VisualData:      preparedTask.VisualData,
 			Graphs:          preparedTask.Graphs,
-		})
+		}
+		preparedTarget := Target{
+			TaskTypeID:  preparedTask.TaskTypeID,
+			OgeNumber:   preparedTask.OgeNumber,
+			SubtypeCode: preparedTask.SubtypeCode,
+		}
+		if err := validateGeneratedContent(preparedTarget, &content); err != nil {
+			log.Printf("task generate cache item rejected: user_id=%d mode=%s target=%d/%s prepared_id=%d error=%v",
+				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID, err)
+			return s.generateOnDemand(ctx, req, target)
+		}
+		return s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), preparedTarget, content, preparedTask.Source))
 	}
 	var appErr *app.Error
 	if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
 		log.Printf("task generate cache miss: user_id=%d mode=%s target=%d/%s",
 			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode)
-		return Task{}, app.TaskUnavailable("Готовая задача для этой категории еще готовится")
+		return s.generateOnDemand(ctx, req, target)
 	}
 	log.Printf("task generate cache error: user_id=%d mode=%s target=%d/%s error=%v",
 		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, err)
 	return Task{}, err
+}
+
+func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, target Target) (Task, error) {
+	content, source, err := s.generateContent(ctx, target)
+	if err != nil {
+		return Task{}, err
+	}
+	log.Printf("task generate on-demand: user_id=%d mode=%s target=%d/%s source=%s",
+		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, source)
+	return s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), target, content, source))
+}
+
+func createGeneratedTask(userID int64, mode string, target Target, content GeneratedContent, source string) CreateTask {
+	return CreateTask{
+		UserID:          userID,
+		Mode:            mode,
+		TaskTypeID:      target.TaskTypeID,
+		OgeNumber:       target.OgeNumber,
+		SubtypeCode:     target.SubtypeCode,
+		Question:        strings.TrimSpace(content.Question),
+		CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
+		SolutionSteps:   content.SolutionSteps,
+		SelfCheck:       strings.TrimSpace(content.SelfCheck),
+		IsValid:         content.IsValid,
+		ValidationNotes: strings.TrimSpace(content.ValidationNotes),
+		Source:          source,
+		VisualData:      content.VisualData,
+		Graphs:          content.Graphs,
+	}
 }
 
 func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask, error) {
@@ -301,6 +335,9 @@ func validateGeneratedContent(target Target, content *GeneratedContent) error {
 	}
 	if !content.IsValid {
 		return errors.New("AI returned is_valid=false")
+	}
+	if err := ValidateUserFacingText(*content); err != nil {
+		return err
 	}
 	if !RequiresVisualData(target) {
 		content.VisualData = nil
