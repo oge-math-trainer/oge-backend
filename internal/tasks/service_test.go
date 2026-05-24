@@ -8,26 +8,27 @@ import (
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
-func TestGenerateWithoutPreparedTaskFallsBackToOnDemandAI(t *testing.T) {
+func TestGenerateWithoutPreparedTaskReturnsUnavailable(t *testing.T) {
 	repo := &fakeRepo{}
 	ai := &fakeAI{configured: true}
 	service := NewService(repo, ai)
 	oge := 9
 
-	task, err := service.Generate(context.Background(), GenerateRequest{
+	_, err := service.Generate(context.Background(), GenerateRequest{
 		UserID:      1,
 		Mode:        ModeCustom,
 		OgeNumber:   &oge,
 		SubtypeCode: "linear_equation",
 	})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected task unavailable")
 	}
-	if ai.generateCalls != 1 {
-		t.Fatalf("expected one AI call, got %d", ai.generateCalls)
+	var appErr *app.Error
+	if !errors.As(err, &appErr) || appErr.Code != app.CodeTaskUnavailable {
+		t.Fatalf("expected task_unavailable, got %v", err)
 	}
-	if task.Question != "generated" {
-		t.Fatalf("expected on-demand generated task, got %q", task.Question)
+	if ai.generateCalls != 0 {
+		t.Fatalf("expected no foreground AI calls, got %d", ai.generateCalls)
 	}
 }
 
@@ -181,7 +182,7 @@ func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
 	}
 }
 
-func TestGenerateRejectsInvalidPreparedTaskAndFallsBackToOnDemandAI(t *testing.T) {
+func TestGenerateRejectsInvalidPreparedTaskWithoutForegroundAI(t *testing.T) {
 	prepared := &PreparedTask{
 		ID:              123,
 		Mode:            ModeCustom,
@@ -200,20 +201,21 @@ func TestGenerateRejectsInvalidPreparedTaskAndFallsBackToOnDemandAI(t *testing.T
 	service := NewService(repo, ai)
 	oge := 9
 
-	task, err := service.Generate(context.Background(), GenerateRequest{
+	_, err := service.Generate(context.Background(), GenerateRequest{
 		UserID:      1,
 		Mode:        ModeCustom,
 		OgeNumber:   &oge,
 		SubtypeCode: "linear_equation",
 	})
-	if err != nil {
-		t.Fatalf("Generate returned error: %v", err)
+	if err == nil {
+		t.Fatal("expected task unavailable")
 	}
-	if ai.generateCalls != 1 {
-		t.Fatalf("expected one AI call after rejecting prepared task, got %d", ai.generateCalls)
+	var appErr *app.Error
+	if !errors.As(err, &appErr) || appErr.Code != app.CodeTaskUnavailable {
+		t.Fatalf("expected task_unavailable, got %v", err)
 	}
-	if task.Question != "generated" {
-		t.Fatalf("expected on-demand generated task, got %q", task.Question)
+	if ai.generateCalls != 0 {
+		t.Fatalf("expected no foreground AI calls, got %d", ai.generateCalls)
 	}
 }
 
@@ -243,6 +245,39 @@ func TestGenerateSkipsDuplicatePreparedTaskForUser(t *testing.T) {
 	}
 	if ai.generateCalls != 0 {
 		t.Fatalf("expected no on-demand AI calls, got %d", ai.generateCalls)
+	}
+}
+
+func TestGenerateReturnsUnavailableAfterDuplicatePreparedTasks(t *testing.T) {
+	repo := &fakeRepo{
+		preparedQueue: []PreparedTask{
+			validPreparedTask(1, "duplicate question 1"),
+			validPreparedTask(2, "duplicate question 2"),
+		},
+		createGeneratedErrs: []error{
+			app.Conflict("duplicate generated task"),
+			app.Conflict("duplicate generated task"),
+		},
+	}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+	oge := 9
+
+	_, err := service.Generate(context.Background(), GenerateRequest{
+		UserID:      1,
+		Mode:        ModeCustom,
+		OgeNumber:   &oge,
+		SubtypeCode: "linear_equation",
+	})
+	if err == nil {
+		t.Fatal("expected task unavailable")
+	}
+	var appErr *app.Error
+	if !errors.As(err, &appErr) || appErr.Code != app.CodeTaskUnavailable {
+		t.Fatalf("expected task_unavailable, got %v", err)
+	}
+	if ai.generateCalls != 0 {
+		t.Fatalf("expected no foreground AI calls, got %d", ai.generateCalls)
 	}
 }
 
