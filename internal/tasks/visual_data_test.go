@@ -20,6 +20,32 @@ func TestValidateGraphVisualData(t *testing.T) {
 	}
 }
 
+func TestValidateGraphVisualDataWithSeparatePlots(t *testing.T) {
+	data := VisualData{
+		"type":   string(VisualKindGraph),
+		"x_axis": map[string]any{"min": -5, "max": 5},
+		"y_axis": map[string]any{"min": -5, "max": 5},
+		"plots": []any{
+			map[string]any{
+				"id":     "A",
+				"points": []any{point(-1, 1), point(0, 0), point(1, 1)},
+			},
+			map[string]any{
+				"id":     "B",
+				"points": []any{point(-1, -1), point(0, 0), point(1, -1)},
+			},
+			map[string]any{
+				"id":     "C",
+				"points": []any{point(-1, 0), point(0, 1), point(1, 0)},
+			},
+		},
+	}
+
+	if err := ValidateVisualData(Target{OgeNumber: 11, SubtypeCode: "graphs_match"}, data); err != nil {
+		t.Fatalf("expected valid graph plots visual_data: %v", err)
+	}
+}
+
 func TestValidateGraphVisualDataRejectsTooFewPoints(t *testing.T) {
 	data := VisualData{
 		"type":   string(VisualKindGraph),
@@ -35,6 +61,39 @@ func TestValidateGraphVisualDataRejectsTooFewPoints(t *testing.T) {
 
 	if err := ValidateVisualData(Target{OgeNumber: 11, SubtypeCode: "graphs_linear"}, data); err == nil {
 		t.Fatal("expected graph validation error")
+	}
+}
+
+func TestNormalizeGraphVisualDataSplitsLegacyGraphsIntoPlots(t *testing.T) {
+	content := &GeneratedContent{
+		VisualData: VisualData{
+			"type":   string(VisualKindGraph),
+			"x_axis": map[string]any{"min": -5, "max": 5},
+			"y_axis": map[string]any{"min": -5, "max": 5},
+			"graphs": []any{
+				map[string]any{
+					"id":     "A",
+					"points": []any{point(-1, 1), point(0, 0), point(1, 1)},
+				},
+				map[string]any{
+					"id":     "B",
+					"points": []any{point(-1, -1), point(0, 0), point(1, -1)},
+				},
+			},
+		},
+	}
+
+	data, err := NormalizeAndValidateVisualData(Target{OgeNumber: 11, SubtypeCode: "graphs_match"}, content)
+	if err != nil {
+		t.Fatalf("expected graph visual_data to normalize: %v", err)
+	}
+
+	plots, ok := data["plots"].([]any)
+	if !ok {
+		t.Fatalf("expected normalized plots array, got %T", data["plots"])
+	}
+	if len(plots) != 2 {
+		t.Fatalf("expected 2 plots, got %d", len(plots))
 	}
 }
 

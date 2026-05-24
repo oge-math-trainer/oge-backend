@@ -21,6 +21,17 @@ func TestBuildGeneratePromptUsesCircleTangentsTemplate(t *testing.T) {
 	}
 }
 
+func TestBuildGeneratePromptUsesSeparateGraphPlots(t *testing.T) {
+	prompt := buildGeneratePrompt(tasks.Target{OgeNumber: 11, SubtypeCode: "graphs_match"}, "")
+
+	if !strings.Contains(prompt, `"plots"`) {
+		t.Fatalf("expected graph prompt to request separate plots, got prompt:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "separate graph pictures") {
+		t.Fatalf("expected graph prompt to forbid combining curves into one picture")
+	}
+}
+
 func TestValidateAnswerFormats(t *testing.T) {
 	valid := []string{"12", "-3", "4,5", "231"}
 	for _, answer := range valid {

@@ -299,8 +299,8 @@ func visualPromptRule(target tasks.Target) string {
 	case tasks.VisualKindGraph:
 		return `Required visual_data:
 Add "visual_data" using this schema:
-{"type":"graph","x_axis":{"min":-10,"max":10},"y_axis":{"min":-10,"max":10},"graphs":[{"id":"1","label":"y = x","points":[{"x":-2,"y":-2},{"x":0,"y":0},{"x":2,"y":2}]}]}
-Use 1 to 4 graph series. Each series must have at least 3 coordinate points.`
+{"type":"graph","x_axis":{"min":-10,"max":10},"y_axis":{"min":-10,"max":10},"plots":[{"id":"A","label":"Graph A","points":[{"x":-2,"y":4},{"x":0,"y":0},{"x":2,"y":4}]},{"id":"B","label":"Graph B","points":[{"x":-2,"y":-4},{"x":0,"y":0},{"x":2,"y":-4}]},{"id":"C","label":"Graph C","points":[{"x":-2,"y":0},{"x":0,"y":4},{"x":2,"y":0}]}]}
+For OGE 11 matching tasks, create exactly 3 separate graph pictures: A, B, C. Put each picture in visual_data.plots. Do not combine several curves into one plot unless the task explicitly asks for intersections or a system. Each plot must have at least 3 coordinate points.`
 	case tasks.VisualKindNumberLine:
 		return `Required visual_data:
 Add "visual_data" using this schema:

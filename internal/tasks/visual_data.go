@@ -68,6 +68,9 @@ func NormalizeAndValidateVisualData(target Target, content *GeneratedContent) (V
 	if len(data) == 0 {
 		return nil, fmt.Errorf("visual_data is required for %s tasks", VisualKindForTarget(target))
 	}
+	if VisualKindForTarget(target) == VisualKindGraph {
+		data = normalizeGraphVisualData(data)
+	}
 	if err := ValidateVisualData(target, data); err != nil {
 		return nil, err
 	}
@@ -171,6 +174,13 @@ func FallbackVisualData(target Target) VisualData {
 			"type":   string(VisualKindGraph),
 			"x_axis": map[string]any{"min": -5, "max": 5},
 			"y_axis": map[string]any{"min": -5, "max": 5},
+			"plots": []any{
+				map[string]any{
+					"id":     "A",
+					"label":  "Graph A",
+					"points": []any{point(-2, -2), point(0, 0), point(2, 2)},
+				},
+			},
 			"graphs": []any{
 				map[string]any{
 					"id":     "1",
@@ -311,6 +321,22 @@ func validateGraphVisualData(data VisualData) error {
 		return err
 	}
 
+	if rawPlots, ok := data["plots"]; ok {
+		plots, err := arrayFromValue(rawPlots, "visual_data.plots")
+		if err != nil {
+			return err
+		}
+		if len(plots) == 0 {
+			return fmt.Errorf("visual_data.plots must contain at least one plot")
+		}
+		for i, rawPlot := range plots {
+			if err := validateGraphPlot(data, rawPlot, fmt.Sprintf("visual_data.plots[%d]", i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	if rawGraphs, ok := data["graphs"]; ok {
 		graphs, err := arrayFromValue(rawGraphs, "visual_data.graphs")
 		if err != nil {
@@ -332,6 +358,51 @@ func validateGraphVisualData(data VisualData) error {
 	}
 
 	return validateGraphSeries(data, "visual_data")
+}
+
+func validateGraphPlot(root VisualData, rawPlot any, path string) error {
+	plot, err := objectFromValue(rawPlot, path)
+	if err != nil {
+		return err
+	}
+
+	if rawXAxis, ok := plot["x_axis"]; ok {
+		if err := validateAxis(rawXAxis, path+".x_axis"); err != nil {
+			return err
+		}
+	} else if _, ok := root["x_axis"]; !ok {
+		return fmt.Errorf("%s.x_axis is required when visual_data.x_axis is missing", path)
+	}
+
+	if rawYAxis, ok := plot["y_axis"]; ok {
+		if err := validateAxis(rawYAxis, path+".y_axis"); err != nil {
+			return err
+		}
+	} else if _, ok := root["y_axis"]; !ok {
+		return fmt.Errorf("%s.y_axis is required when visual_data.y_axis is missing", path)
+	}
+
+	if rawGraphs, ok := plot["graphs"]; ok {
+		graphs, err := arrayFromValue(rawGraphs, path+".graphs")
+		if err != nil {
+			return err
+		}
+		if len(graphs) == 0 {
+			return fmt.Errorf("%s.graphs must contain at least one graph", path)
+		}
+		for i, rawGraph := range graphs {
+			graph, err := objectFromValue(rawGraph, fmt.Sprintf("%s.graphs[%d]", path, i))
+			if err != nil {
+				return err
+			}
+			if err := validateGraphSeries(graph, fmt.Sprintf("%s.graphs[%d]", path, i)); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	return validateGraphSeries(plot, path)
 }
 
 func validateGraphSeries(graph map[string]any, path string) error {
@@ -627,6 +698,83 @@ func validateCoordinatePair(raw any, path string) error {
 	return nil
 }
 
+func normalizeGraphVisualData(data VisualData) VisualData {
+	if len(data) == 0 {
+		return data
+	}
+	if _, ok := data["plots"]; ok {
+		return data
+	}
+
+	plots := make([]any, 0)
+	if rawGraphs, ok := data["graphs"]; ok {
+		graphs, err := arrayFromValue(rawGraphs, "visual_data.graphs")
+		if err == nil {
+			for i, rawGraph := range graphs {
+				graph, err := objectFromValue(rawGraph, fmt.Sprintf("visual_data.graphs[%d]", i))
+				if err != nil {
+					continue
+				}
+				plot := graphPlotFromSeries(graph, i)
+				if len(plot) > 0 {
+					plots = append(plots, plot)
+				}
+			}
+		}
+	}
+
+	if len(plots) == 0 {
+		if rawPoints, ok := data["points"]; ok {
+			plots = append(plots, map[string]any{
+				"id":     "A",
+				"label":  "Graph A",
+				"points": rawPoints,
+			})
+		}
+	}
+
+	if len(plots) > 0 {
+		data["plots"] = plots
+	}
+	return data
+}
+
+func graphPlotFromSeries(series map[string]any, index int) map[string]any {
+	plot := make(map[string]any)
+	id := graphPlotID(index)
+	if rawID, ok := series["id"]; ok {
+		if value, err := stringFromValue(rawID, "id"); err == nil {
+			id = value
+		}
+	}
+	plot["id"] = id
+
+	if rawLabel, ok := series["label"]; ok {
+		if label, err := stringFromValue(rawLabel, "label"); err == nil {
+			plot["label"] = label
+		}
+	}
+	if _, ok := plot["label"]; !ok {
+		plot["label"] = "Graph " + id
+	}
+
+	for _, key := range []string{"x_axis", "y_axis", "points", "graphs"} {
+		if value, ok := series[key]; ok {
+			plot[key] = value
+		}
+	}
+
+	return plot
+}
+
+func graphPlotID(index int) string {
+	ids := []string{"A", "B", "C", "D"}
+	if index >= 0 && index < len(ids) {
+		return ids[index]
+	}
+	return fmt.Sprintf("%d", index+1)
+}
+
 func visualDataFromLegacyGraphs(graphs []GraphInfo) VisualData {
 	xMin, xMax, yMin, yMax := -10, 10, -10, 10
 	if len(graphs) > 0 && graphs[0].XMin < graphs[0].XMax && graphs[0].YMin < graphs[0].YMax {
@@ -634,22 +782,26 @@ func visualDataFromLegacyGraphs(graphs []GraphInfo) VisualData {
 	}
 
 	series := make([]any, 0, len(graphs))
+	plots := make([]any, 0, len(graphs))
 	for i, graph := range graphs {
 		id := strings.TrimSpace(graph.ID)
 		if id == "" {
-			id = fmt.Sprintf("%d", i+1)
+			id = graphPlotID(i)
 		}
-		series = append(series, map[string]any{
+		item := map[string]any{
 			"id":     id,
 			"label":  strings.TrimSpace(graph.Type),
 			"points": legacyGraphPoints(graph, xMin, xMax),
-		})
+		}
+		series = append(series, item)
+		plots = append(plots, graphPlotFromSeries(item, i))
 	}
 
 	return VisualData{
 		"type":   string(VisualKindGraph),
 		"x_axis": map[string]any{"min": xMin, "max": xMax},
 		"y_axis": map[string]any{"min": yMin, "max": yMax},
+		"plots":  plots,
 		"graphs": series,
 	}
 }
