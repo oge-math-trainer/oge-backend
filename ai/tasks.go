@@ -705,9 +705,9 @@ func generationMaxTokens(target tasks.Target) int {
 
 func generationTemperature(target tasks.Target) float64 {
 	if tasks.RequiresVisualData(target) {
-		return 0.3
+		return 0.5
 	}
-	return 0.4
+	return 0.6
 }
 
 func truncateFeedback(value string) string {
