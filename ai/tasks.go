@@ -539,7 +539,7 @@ func visualPromptRule(target tasks.Target) string {
 Add "visual_data" using this schema. For smooth curves provide at least 11 evenly spaced points across the x range.
 Example for parabola y=x^2 with 11 points:
 {"type":"graph","x_axis":{"min":-5,"max":5},"y_axis":{"min":-2,"max":10},"plots":[{"id":"A","label":"Graph A","points":[{"x":-5,"y":25},{"x":-4,"y":16},{"x":-3,"y":9},{"x":-2,"y":4},{"x":-1,"y":1},{"x":0,"y":0},{"x":1,"y":1},{"x":2,"y":4},{"x":3,"y":9},{"x":4,"y":16},{"x":5,"y":25}]}]}
-For OGE 11 matching tasks create exactly 3 separate plots: A, B, C. Each plot minimum 11 points. Do not combine curves.`
+For OGE 11 matching tasks create exactly 3 separate plots as separate graph pictures: A, B, C. Each plot minimum 11 points. Do not combine curves.`
 	case tasks.VisualKindNumberLine:
 		return `Required visual_data:
 Add "visual_data" using this schema:
