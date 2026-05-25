@@ -3,8 +3,10 @@ package mail
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"fmt"
 	"mime"
+	"net"
 	stdmail "net/mail"
 	"net/smtp"
 	"strconv"
@@ -24,6 +26,8 @@ type SMTPConfig struct {
 type SMTPMailer struct {
 	config SMTPConfig
 }
+
+const smtpTimeout = 15 * time.Second
 
 func NewSMTPMailer(config SMTPConfig) *SMTPMailer {
 	config.Host = strings.TrimSpace(config.Host)
@@ -75,5 +79,64 @@ func (m *SMTPMailer) SendPasswordResetCode(ctx context.Context, email, code stri
 	if m.config.Username != "" || m.config.Password != "" {
 		auth = smtp.PlainAuth("", m.config.Username, m.config.Password, m.config.Host)
 	}
-	return smtp.SendMail(addr, auth, m.config.FromEmail, []string{email}, msg.Bytes())
+	return sendMail(ctx, addr, m.config.Host, auth, m.config.FromEmail, []string{email}, msg.Bytes())
+}
+
+func sendMail(ctx context.Context, addr, host string, auth smtp.Auth, from string, to []string, msg []byte) error {
+	ctx, cancel := context.WithTimeout(ctx, smtpTimeout)
+	defer cancel()
+
+	dialer := &net.Dialer{Timeout: smtpTimeout}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(deadline)
+	}
+
+	client, err := smtp.NewClient(conn, host)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	if ok, _ := client.Extension("STARTTLS"); ok {
+		config := &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			ServerName: host,
+		}
+		if err := client.StartTLS(config); err != nil {
+			return err
+		}
+	}
+	if auth != nil {
+		if ok, _ := client.Extension("AUTH"); ok {
+			if err := client.Auth(auth); err != nil {
+				return err
+			}
+		}
+	}
+	if err := client.Mail(from); err != nil {
+		return err
+	}
+	for _, recipient := range to {
+		if err := client.Rcpt(recipient); err != nil {
+			return err
+		}
+	}
+	writer, err := client.Data()
+	if err != nil {
+		return err
+	}
+	if _, err := writer.Write(msg); err != nil {
+		_ = writer.Close()
+		return err
+	}
+	if err := writer.Close(); err != nil {
+		return err
+	}
+	return client.Quit()
 }
