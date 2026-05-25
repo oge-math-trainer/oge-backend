@@ -180,6 +180,9 @@ func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
 	if repo.created.UserID != 1 {
 		t.Fatalf("expected created user id 1, got %d", repo.created.UserID)
 	}
+	if repo.preparedUserID != 1 {
+		t.Fatalf("expected prepared lookup user id 1, got %d", repo.preparedUserID)
+	}
 }
 
 func TestGenerateRejectsInvalidPreparedTaskWithoutForegroundAI(t *testing.T) {
@@ -360,6 +363,7 @@ func TestCheckStoresOriginalTaskMode(t *testing.T) {
 type fakeRepo struct {
 	prepared            *PreparedTask
 	preparedQueue       []PreparedTask
+	preparedUserID      int64
 	created             CreateTask
 	task                Task
 	attemptMode         string
@@ -407,7 +411,8 @@ func (r *fakeRepo) CreatePreparedTask(_ context.Context, task CreateTask) (Prepa
 	return prepared, nil
 }
 
-func (r *fakeRepo) GetPreparedTask(context.Context, Target) (PreparedTask, error) {
+func (r *fakeRepo) GetPreparedTask(_ context.Context, userID int64, _ Target) (PreparedTask, error) {
+	r.preparedUserID = userID
 	if len(r.preparedQueue) > 0 {
 		prepared := r.preparedQueue[0]
 		r.preparedQueue = r.preparedQueue[1:]

@@ -151,7 +151,7 @@ type Repository interface {
 	GetRandomTaskType(ctx context.Context) (Target, error)
 	GetPreparationTarget(ctx context.Context, minReady int) (Target, int, error)
 	ResolveTarget(ctx context.Context, target Target) (Target, error)
-	GetPreparedTask(ctx context.Context, target Target) (PreparedTask, error)
+	GetPreparedTask(ctx context.Context, userID int64, target Target) (PreparedTask, error)
 	CountPreparedTasks(ctx context.Context) (int, error)
 	CreatePreparedTask(ctx context.Context, task CreateTask) (PreparedTask, error)
 	CreateGeneratedTask(ctx context.Context, task CreateTask) (Task, error)
@@ -185,7 +185,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 
 	const maxPreparedAttempts = 5
 	for attempt := 1; attempt <= maxPreparedAttempts; attempt++ {
-		preparedTask, err := s.repo.GetPreparedTask(ctx, target)
+		preparedTask, err := s.repo.GetPreparedTask(ctx, req.UserID, target)
 		if err != nil {
 			var appErr *app.Error
 			if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {

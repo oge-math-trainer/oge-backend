@@ -148,6 +148,7 @@ func (s *Store) GetRandomTaskType(ctx context.Context) (tasks.Target, error) {
 				SELECT 1
 				FROM prepared_tasks pt
 				WHERE pt.used = false
+					AND pt.shown_count < 20
 					AND pt.oge_number = tt.oge_number
 					AND pt.subtype_code = tt.subtype_code
 			)
@@ -163,6 +164,7 @@ func (s *Store) GetPreparationTarget(ctx context.Context, minReady int) (tasks.T
 		FROM task_types tt
 		LEFT JOIN prepared_tasks pt
 			ON pt.used = false
+			AND pt.shown_count < 20
 			AND pt.oge_number = tt.oge_number
 			AND pt.subtype_code = tt.subtype_code
 		WHERE tt.oge_number BETWEEN 6 AND 19
@@ -202,24 +204,84 @@ func (s *Store) ResolveTarget(ctx context.Context, target tasks.Target) (tasks.T
 	return resolved, nil
 }
 
-func (s *Store) GetPreparedTask(ctx context.Context, target tasks.Target) (tasks.PreparedTask, error) {
+func (s *Store) GetPreparedTask(ctx context.Context, userID int64, target tasks.Target) (tasks.PreparedTask, error) {
 	row := s.pool.QueryRow(ctx, `
-		DELETE FROM prepared_tasks
-		WHERE id = (
-			SELECT id
-			FROM prepared_tasks
-			WHERE used = false AND oge_number = $1 AND subtype_code = $2
-			ORDER BY created_at ASC
+		WITH selected AS (
+			SELECT pt.id
+			FROM prepared_tasks pt
+			WHERE pt.used = false
+				AND pt.shown_count < 20
+				AND pt.oge_number = $1
+				AND pt.subtype_code = $2
+				AND NOT EXISTS (
+					SELECT 1
+					FROM prepared_task_views pv
+					WHERE pv.prepared_task_id = pt.id
+						AND pv.user_id = $3
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM generated_tasks gt
+					WHERE gt.user_id = $3
+						AND gt.oge_number = pt.oge_number
+						AND gt.subtype_code = pt.subtype_code
+						AND md5(regexp_replace(lower(trim(gt.question)), '\s+', ' ', 'g')) =
+						    md5(regexp_replace(lower(trim(pt.question)), '\s+', ' ', 'g'))
+				)
+			ORDER BY pt.shown_count ASC, pt.created_at ASC
 			LIMIT 1
 			FOR UPDATE SKIP LOCKED
+		),
+		viewed AS (
+			INSERT INTO prepared_task_views (prepared_task_id, user_id)
+			SELECT selected.id, $3
+			FROM selected
+			ON CONFLICT (prepared_task_id, user_id) DO NOTHING
+			RETURNING prepared_task_id
+		),
+		updated AS (
+			UPDATE prepared_tasks pt
+			SET shown_count = pt.shown_count + 1,
+				used = (pt.shown_count + 1) >= 20
+			FROM viewed
+			WHERE pt.id = viewed.prepared_task_id
+			RETURNING pt.id, pt.mode, pt.task_type_id, pt.oge_number, pt.subtype_code, pt.question, pt.correct_answer,
+				COALESCE(pt.solution_steps, '[]'::jsonb) AS solution_steps,
+				COALESCE(pt.self_check, '') AS self_check,
+				pt.is_valid,
+				COALESCE(pt.validation_notes, '') AS validation_notes,
+				pt.generation_source,
+				COALESCE(pt.visual_data, '{}'::jsonb) AS visual_data,
+				COALESCE(pt.graphs, '[]'::jsonb) AS graphs,
+				pt.created_at,
+				pt.shown_count
 		)
-		RETURNING id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
+		SELECT id, mode, task_type_id, oge_number, subtype_code, question, correct_answer,
 			COALESCE(solution_steps, '[]'::jsonb), COALESCE(self_check, ''), is_valid,
 			COALESCE(validation_notes, ''), generation_source,
 			COALESCE(visual_data, '{}'::jsonb), COALESCE(graphs, '[]'::jsonb), created_at
-	`, target.OgeNumber, target.SubtypeCode)
+		FROM updated
+	`, target.OgeNumber, target.SubtypeCode, userID)
 
-	return scanPreparedTask(row)
+	prepared, err := scanPreparedTask(row)
+	if err != nil {
+		return tasks.PreparedTask{}, err
+	}
+	if err := s.deleteExhaustedPreparedTasks(ctx); err != nil {
+		return tasks.PreparedTask{}, err
+	}
+	return prepared, nil
+}
+
+func (s *Store) deleteExhaustedPreparedTasks(ctx context.Context) error {
+	_, err := s.pool.Exec(ctx, `
+		DELETE FROM prepared_tasks
+		WHERE used = true OR shown_count >= 20
+	`)
+	if err != nil {
+		return app.Internal(err)
+	}
+	return nil
 }
 
 func (s *Store) CountPreparedTasks(ctx context.Context) (int, error) {
@@ -227,7 +289,7 @@ func (s *Store) CountPreparedTasks(ctx context.Context) (int, error) {
 	if err := s.pool.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM prepared_tasks
-		WHERE used = false
+		WHERE used = false AND shown_count < 20
 	`).Scan(&count); err != nil {
 		return 0, app.Internal(err)
 	}
@@ -278,6 +340,7 @@ func (s *Store) CreatePreparedTask(ctx context.Context, task tasks.CreateTask) (
 			SELECT 1
 			FROM prepared_tasks
 			WHERE used = false
+				AND shown_count < 20
 				AND oge_number = $3
 				AND subtype_code = $4
 				AND md5(regexp_replace(lower(trim(question)), '\s+', ' ', 'g')) =
