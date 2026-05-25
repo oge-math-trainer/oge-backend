@@ -249,6 +249,7 @@ func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, tar
 			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, source, attempt, maxAttempts)
 		task, err := s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), target, content, source))
 		if err == nil {
+			s.cacheOnDemandTask(ctx, target, content, source)
 			return task, nil
 		}
 		if isAppConflict(err) {
@@ -261,10 +262,44 @@ func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, tar
 	return Task{}, app.TaskUnavailable("Не удалось сгенерировать новую уникальную задачу")
 }
 
+func (s *Service) cacheOnDemandTask(ctx context.Context, target Target, content GeneratedContent, source string) {
+	prepared, err := s.repo.CreatePreparedTask(ctx, createPreparedTask(target, content, source))
+	if err == nil {
+		log.Printf("task generate on-demand cached: prepared_id=%d target=%d/%s source=%s",
+			prepared.ID, target.OgeNumber, target.SubtypeCode, source)
+		return
+	}
+	if isAppConflict(err) {
+		log.Printf("task generate on-demand already cached: target=%d/%s",
+			target.OgeNumber, target.SubtypeCode)
+		return
+	}
+	log.Printf("task generate on-demand cache store failed: target=%d/%s error=%v",
+		target.OgeNumber, target.SubtypeCode, err)
+}
+
 func createGeneratedTask(userID int64, mode string, target Target, content GeneratedContent, source string) CreateTask {
 	return CreateTask{
 		UserID:          userID,
 		Mode:            mode,
+		TaskTypeID:      target.TaskTypeID,
+		OgeNumber:       target.OgeNumber,
+		SubtypeCode:     target.SubtypeCode,
+		Question:        strings.TrimSpace(content.Question),
+		CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
+		SolutionSteps:   content.SolutionSteps,
+		SelfCheck:       strings.TrimSpace(content.SelfCheck),
+		IsValid:         content.IsValid,
+		ValidationNotes: strings.TrimSpace(content.ValidationNotes),
+		Source:          source,
+		VisualData:      content.VisualData,
+		Graphs:          content.Graphs,
+	}
+}
+
+func createPreparedTask(target Target, content GeneratedContent, source string) CreateTask {
+	return CreateTask{
+		Mode:            ModeCustom,
 		TaskTypeID:      target.TaskTypeID,
 		OgeNumber:       target.OgeNumber,
 		SubtypeCode:     target.SubtypeCode,
@@ -287,21 +322,7 @@ func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask,
 		if err != nil {
 			return PreparedTask{}, err
 		}
-		prepared, err := s.repo.CreatePreparedTask(ctx, CreateTask{
-			Mode:            ModeCustom,
-			TaskTypeID:      target.TaskTypeID,
-			OgeNumber:       target.OgeNumber,
-			SubtypeCode:     target.SubtypeCode,
-			Question:        strings.TrimSpace(content.Question),
-			CorrectAnswer:   strings.TrimSpace(content.CorrectAnswer),
-			SolutionSteps:   content.SolutionSteps,
-			SelfCheck:       strings.TrimSpace(content.SelfCheck),
-			IsValid:         content.IsValid,
-			ValidationNotes: strings.TrimSpace(content.ValidationNotes),
-			Source:          source,
-			VisualData:      content.VisualData,
-			Graphs:          content.Graphs,
-		})
+		prepared, err := s.repo.CreatePreparedTask(ctx, createPreparedTask(target, content, source))
 		if err == nil {
 			return prepared, nil
 		}

@@ -35,6 +35,38 @@ func TestGenerateWithoutPreparedTaskGeneratesOnDemand(t *testing.T) {
 	if repo.created.UserID != 1 || repo.created.OgeNumber != 9 || repo.created.SubtypeCode != "linear_equation" {
 		t.Fatalf("unexpected created task: %+v", repo.created)
 	}
+	if repo.prepared == nil {
+		t.Fatal("expected on-demand task to be cached as prepared task")
+	}
+	if repo.prepared.Question != "generated" || repo.prepared.Source != "gpt-4o-mini" {
+		t.Fatalf("unexpected cached prepared task: %+v", repo.prepared)
+	}
+	if repo.createPreparedCalls != 1 {
+		t.Fatalf("expected one prepared task cache write, got %d", repo.createPreparedCalls)
+	}
+}
+
+func TestGenerateOnDemandIgnoresDuplicatePreparedCache(t *testing.T) {
+	repo := &fakeRepo{createPreparedErrs: []error{app.Conflict("duplicate prepared task")}}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+	oge := 9
+
+	task, err := service.Generate(context.Background(), GenerateRequest{
+		UserID:      1,
+		Mode:        ModeCustom,
+		OgeNumber:   &oge,
+		SubtypeCode: "linear_equation",
+	})
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if task.Question != "generated" {
+		t.Fatalf("expected on-demand generated task, got %q", task.Question)
+	}
+	if repo.createPreparedCalls != 1 {
+		t.Fatalf("expected one prepared task cache write, got %d", repo.createPreparedCalls)
+	}
 }
 
 func TestPrepareTaskVisualFallbackWithoutAIKey(t *testing.T) {
@@ -373,6 +405,7 @@ type fakeRepo struct {
 	attemptMode         string
 	createGeneratedErrs []error
 	createPreparedErrs  []error
+	createPreparedCalls int
 }
 
 func (r *fakeRepo) TryAcquirePreparationLock(context.Context) (func(), bool, error) {
@@ -388,6 +421,7 @@ func (r *fakeRepo) CountPreparedTasks(context.Context) (int, error) {
 }
 
 func (r *fakeRepo) CreatePreparedTask(_ context.Context, task CreateTask) (PreparedTask, error) {
+	r.createPreparedCalls++
 	if len(r.createPreparedErrs) > 0 {
 		err := r.createPreparedErrs[0]
 		r.createPreparedErrs = r.createPreparedErrs[1:]
