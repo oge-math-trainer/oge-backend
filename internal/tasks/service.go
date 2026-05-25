@@ -191,7 +191,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 			if errors.As(err, &appErr) && appErr.Code == app.CodeNotFound {
 				log.Printf("task generate cache miss: user_id=%d mode=%s target=%d/%s",
 					req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode)
-				return Task{}, app.TaskUnavailable("Готовые уникальные задачи для этой темы еще готовятся")
+				return s.generateOnDemand(ctx, req, target)
 			}
 			log.Printf("task generate cache error: user_id=%d mode=%s target=%d/%s error=%v",
 				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, err)
