@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: oge-backend
+    runtime: go
+    plan: free
+    region: frankfurt
+    buildCommand: go build -tags netgo -ldflags '-s -w' -o app ./cmd/server && go build -tags netgo -ldflags '-s -w' -o migrate ./cmd/migrate
+    preDeployCommand: ./migrate
+    startCommand: ./app
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: oge-postgres
+          property: connectionString
+      - key: AUTH_SECRET
+        sync: false
+      - key: TOKEN_TTL
+        value: 24h
+      - key: AUTH_RATE_LIMIT_REQUESTS
+        value: "10"
+      - key: AUTH_RATE_LIMIT_WINDOW
+        value: 1m
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URL
+        sync: false
+      - key: YANDEX_CLIENT_ID
+        sync: false
+      - key: YANDEX_CLIENT_SECRET
+        sync: false
+      - key: YANDEX_REDIRECT_URL
+        sync: false
+      - key: AITUNNEL_BASE_URL
+        value: https://api.aitunnel.ru/v1
+      - key: AITUNNEL_API_KEY
+        sync: false
+      - key: AITUNNEL_MODEL
+        sync: false
+      - key: PREPARED_TASKS_MIN
+        value: "50"
+      - key: PREPARED_TASKS_INTERVAL
+        value: 5m
+
+databases:
+  - name: oge-postgres
+    region: frankfurt
+    plan: free
+    databaseName: oge_backend
+    user: oge_backend

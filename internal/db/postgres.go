@@ -93,7 +93,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (aut
 
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (auth.UserWithPassword, error) {
 	row := s.pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, created_at
+		SELECT id, email, COALESCE(password_hash, ''), created_at
 		FROM users
 		WHERE lower(email) = lower($1)
 	`, email)
@@ -104,6 +104,117 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (auth.UserWith
 			return auth.UserWithPassword{}, app.NotFound("Пользователь не найден")
 		}
 		return auth.UserWithPassword{}, app.Internal(err)
+	}
+	return user, nil
+}
+
+func (s *Store) FindOrCreateOAuthUser(ctx context.Context, identity auth.OAuthIdentity) (auth.User, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return auth.User{}, app.Internal(err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	user, err := selectOAuthUser(ctx, tx, identity.Provider, identity.ProviderUserID)
+	if err == nil {
+		if err := tx.Commit(ctx); err != nil {
+			return auth.User{}, app.Internal(err)
+		}
+		return user, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return auth.User{}, app.Internal(err)
+	}
+
+	user, err = selectUserByEmail(ctx, tx, identity.Email)
+	if errors.Is(err, pgx.ErrNoRows) {
+		user, err = insertOAuthUser(ctx, tx, identity.Email)
+		if err != nil && isUniqueViolation(err) {
+			user, err = selectUserByEmail(ctx, tx, identity.Email)
+		}
+	}
+	if err != nil {
+		return auth.User{}, app.Internal(err)
+	}
+
+	var linkedUserID int64
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO user_identities (user_id, provider, provider_user_id, email)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (provider, provider_user_id)
+		DO UPDATE SET email = EXCLUDED.email
+		RETURNING user_id
+	`, user.ID, identity.Provider, identity.ProviderUserID, identity.Email).Scan(&linkedUserID); err != nil {
+		return auth.User{}, app.Internal(err)
+	}
+	if linkedUserID != user.ID {
+		user, err = selectUserByID(ctx, tx, linkedUserID)
+		if err != nil {
+			return auth.User{}, app.Internal(err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return auth.User{}, app.Internal(err)
+	}
+	return user, nil
+}
+
+func selectOAuthUser(ctx context.Context, tx pgx.Tx, provider, providerUserID string) (auth.User, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT u.id, u.email, u.created_at
+		FROM user_identities ui
+		JOIN users u ON u.id = ui.user_id
+		WHERE ui.provider = $1 AND ui.provider_user_id = $2
+	`, provider, providerUserID)
+
+	var user auth.User
+	if err := row.Scan(&user.ID, &user.Email, &user.CreatedAt); err != nil {
+		return auth.User{}, err
+	}
+	return user, nil
+}
+
+func selectUserByEmail(ctx context.Context, tx pgx.Tx, email string) (auth.User, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, email, created_at
+		FROM users
+		WHERE lower(email) = lower($1)
+	`, email)
+
+	var user auth.User
+	if err := row.Scan(&user.ID, &user.Email, &user.CreatedAt); err != nil {
+		return auth.User{}, err
+	}
+	return user, nil
+}
+
+func selectUserByID(ctx context.Context, tx pgx.Tx, id int64) (auth.User, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT id, email, created_at
+		FROM users
+		WHERE id = $1
+	`, id)
+
+	var user auth.User
+	if err := row.Scan(&user.ID, &user.Email, &user.CreatedAt); err != nil {
+		return auth.User{}, err
+	}
+	return user, nil
+}
+
+func insertOAuthUser(ctx context.Context, tx pgx.Tx, email string) (auth.User, error) {
+	row := tx.QueryRow(ctx, `
+		INSERT INTO users (email, password_hash)
+		VALUES ($1, NULL)
+		RETURNING id, email, created_at
+	`, email)
+
+	var user auth.User
+	if err := row.Scan(&user.ID, &user.Email, &user.CreatedAt); err != nil {
+		return auth.User{}, err
 	}
 	return user, nil
 }

@@ -55,6 +55,18 @@ func main() {
 	}
 
 	authService := auth.NewService(store, cfg.AuthSecret, cfg.TokenTTL)
+	authService.ConfigureOAuth(auth.OAuthConfig{
+		Google: auth.OAuthProviderConfig{
+			ClientID:     cfg.GoogleClientID,
+			ClientSecret: cfg.GoogleClientSecret,
+			RedirectURL:  cfg.GoogleRedirectURL,
+		},
+		Yandex: auth.OAuthProviderConfig{
+			ClientID:     cfg.YandexClientID,
+			ClientSecret: cfg.YandexClientSecret,
+			RedirectURL:  cfg.YandexRedirectURL,
+		},
+	})
 	taskService := tasks.NewService(store, aiClient)
 	diagnosticService := diagnostic.NewService(store, taskService, aiClient)
 	progressService := progress.NewService(store)

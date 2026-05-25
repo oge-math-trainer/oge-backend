@@ -105,6 +105,32 @@ func TestAuthAllowsMissingContentType(t *testing.T) {
 	assertJSONCode(t, resp.Body.Bytes(), "", true)
 }
 
+func TestOAuthStartReturnsProviderURL(t *testing.T) {
+	router := testRouter(testDeps{})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/google/start", nil)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	assertJSONCode(t, resp.Body.Bytes(), "", true)
+}
+
+func TestOAuthCallbackReturnsSession(t *testing.T) {
+	router := testRouter(testDeps{})
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/google/callback?code=test-code&state=test-state", nil)
+	router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", resp.Code, resp.Body.String())
+	}
+	assertJSONCode(t, resp.Body.Bytes(), "", true)
+}
+
 func TestRegisterRejectsPasswordLongerThanBcryptLimit(t *testing.T) {
 	router := testRouter(testDeps{})
 
@@ -271,6 +297,14 @@ func (fakeAuthService) Register(context.Context, string, string) (auth.Session, 
 }
 
 func (fakeAuthService) Login(context.Context, string, string) (auth.Session, error) {
+	return auth.Session{Token: "token", User: auth.User{ID: 1, Email: "a@example.com"}}, nil
+}
+
+func (fakeAuthService) OAuthStart(context.Context, string) (auth.OAuthStart, error) {
+	return auth.OAuthStart{Provider: "google", URL: "https://accounts.google.com/o/oauth2/v2/auth"}, nil
+}
+
+func (fakeAuthService) OAuthCallback(context.Context, string, string, string) (auth.Session, error) {
 	return auth.Session{Token: "token", User: auth.User{ID: 1, Email: "a@example.com"}}, nil
 }
 

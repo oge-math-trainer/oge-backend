@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type Repository interface {
 	CreateUser(ctx context.Context, email, passwordHash string) (User, error)
 	GetUserByEmail(ctx context.Context, email string) (UserWithPassword, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
+	FindOrCreateOAuthUser(ctx context.Context, identity OAuthIdentity) (User, error)
 }
 
 type UserWithPassword struct {
@@ -36,20 +38,33 @@ type UserWithPassword struct {
 	PasswordHash string
 }
 
+type OAuthIdentity struct {
+	Provider       string
+	ProviderUserID string
+	Email          string
+}
+
 type Service struct {
-	repo   Repository
-	secret string
-	ttl    time.Duration
-	now    func() time.Time
+	repo       Repository
+	secret     string
+	ttl        time.Duration
+	now        func() time.Time
+	httpClient *http.Client
+	oauth      OAuthConfig
 }
 
 func NewService(repo Repository, authSecret string, tokenTTL time.Duration) *Service {
 	return &Service{
-		repo:   repo,
-		secret: authSecret,
-		ttl:    tokenTTL,
-		now:    time.Now,
+		repo:       repo,
+		secret:     authSecret,
+		ttl:        tokenTTL,
+		now:        time.Now,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
+}
+
+func (s *Service) ConfigureOAuth(config OAuthConfig) {
+	s.oauth = config
 }
 
 func (s *Service) Register(ctx context.Context, email, password string) (Session, error) {
@@ -78,6 +93,11 @@ func (s *Service) Login(ctx context.Context, email, password string) (Session, e
 			return Session{}, app.Unauthorized("Неверный email или пароль")
 		}
 		return Session{}, err
+	}
+
+	if user.PasswordHash == "" {
+		consumePasswordCompare(password)
+		return Session{}, app.Unauthorized("Invalid email or password")
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {

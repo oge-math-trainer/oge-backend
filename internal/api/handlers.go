@@ -94,6 +94,40 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, http.StatusOK, session)
 }
 
+func (s *Server) handleOAuthStart(w http.ResponseWriter, r *http.Request) {
+	start, err := s.auth.OAuthStart(r.Context(), r.PathValue("provider"))
+	if err != nil {
+		logAuthFailure(r, "oauth_start", err)
+		writeError(w, r, err)
+		return
+	}
+	if r.URL.Query().Get("redirect") == "1" {
+		http.Redirect(w, r, start.URL, http.StatusFound)
+		return
+	}
+	writeSuccess(w, http.StatusOK, start)
+}
+
+func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	if providerErr := strings.TrimSpace(r.URL.Query().Get("error")); providerErr != "" {
+		writeError(w, r, app.Unauthorized(providerErr))
+		return
+	}
+
+	session, err := s.auth.OAuthCallback(
+		r.Context(),
+		r.PathValue("provider"),
+		r.URL.Query().Get("code"),
+		r.URL.Query().Get("state"),
+	)
+	if err != nil {
+		logAuthFailure(r, "oauth_callback", err)
+		writeError(w, r, err)
+		return
+	}
+	writeSuccess(w, http.StatusOK, session)
+}
+
 func logAuthFailure(r *http.Request, action string, err error) {
 	log.Printf("auth %s failed: request_id=%s ip=%s err=%v", action, requestIDFromContext(r.Context()), remoteIP(r), err)
 }

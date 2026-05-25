@@ -17,6 +17,12 @@ type Config struct {
 	AuthRateLimitRequests int
 	AuthRateLimitWindow   time.Duration
 	CORSAllowedOrigins    []string
+	GoogleClientID        string
+	GoogleClientSecret    string
+	GoogleRedirectURL     string
+	YandexClientID        string
+	YandexClientSecret    string
+	YandexRedirectURL     string
 	AITunnelBaseURL       string
 	AITunnelAPIKey        string
 	AITunnelModel         string
@@ -104,6 +110,12 @@ func Load(path string) (Config, error) {
 		AuthRateLimitRequests: rateLimitRequests,
 		AuthRateLimitWindow:   rateLimitWindow,
 		CORSAllowedOrigins:    origins,
+		GoogleClientID:        strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		GoogleClientSecret:    strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
+		GoogleRedirectURL:     strings.TrimSpace(os.Getenv("GOOGLE_REDIRECT_URL")),
+		YandexClientID:        strings.TrimSpace(os.Getenv("YANDEX_CLIENT_ID")),
+		YandexClientSecret:    strings.TrimSpace(os.Getenv("YANDEX_CLIENT_SECRET")),
+		YandexRedirectURL:     strings.TrimSpace(os.Getenv("YANDEX_REDIRECT_URL")),
 		AITunnelBaseURL:       envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
 		AITunnelAPIKey:        strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
 		AITunnelModel:         strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
@@ -133,6 +145,12 @@ func (c Config) ValidateServer() error {
 	}
 	if c.AITunnelAPIKey != "" && c.AITunnelModel == "" {
 		return errors.New("AITUNNEL_MODEL is required when AITUNNEL_API_KEY is set")
+	}
+	if err := validateOAuthProvider("GOOGLE", c.GoogleClientID, c.GoogleClientSecret, c.GoogleRedirectURL); err != nil {
+		return err
+	}
+	if err := validateOAuthProvider("YANDEX", c.YandexClientID, c.YandexClientSecret, c.YandexRedirectURL); err != nil {
+		return err
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
 		return errors.New("PORT must be a number")
@@ -194,6 +212,26 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func validateOAuthProvider(prefix, clientID, clientSecret, redirectURL string) error {
+	values := []string{clientID, clientSecret, redirectURL}
+	filled := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			filled++
+		}
+	}
+	if filled == 0 {
+		return nil
+	}
+	if filled != len(values) {
+		return errors.New(prefix + "_CLIENT_ID, " + prefix + "_CLIENT_SECRET, and " + prefix + "_REDIRECT_URL must be set together")
+	}
+	if !strings.HasPrefix(redirectURL, "http://") && !strings.HasPrefix(redirectURL, "https://") {
+		return errors.New(prefix + "_REDIRECT_URL must start with http:// or https://")
+	}
+	return nil
 }
 
 func splitCSV(raw string) []string {
