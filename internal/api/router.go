@@ -45,23 +45,25 @@ type HealthChecker interface {
 }
 
 type Dependencies struct {
-	Auth                  AuthService
-	Tasks                 TaskService
-	Diagnostic            DiagnosticService
-	Progress              ProgressService
-	Health                HealthChecker
-	CORSAllowedOrigins    []string
-	AuthRateLimitRequests int
-	AuthRateLimitWindow   time.Duration
+	Auth                    AuthService
+	Tasks                   TaskService
+	Diagnostic              DiagnosticService
+	Progress                ProgressService
+	Health                  HealthChecker
+	CORSAllowedOrigins      []string
+	OAuthSuccessRedirectURL string
+	AuthRateLimitRequests   int
+	AuthRateLimitWindow     time.Duration
 }
 
 type Server struct {
-	auth     AuthService
-	tasks    TaskService
-	diag     DiagnosticService
-	progress ProgressService
-	health   HealthChecker
-	cors     map[string]struct{}
+	auth                    AuthService
+	tasks                   TaskService
+	diag                    DiagnosticService
+	progress                ProgressService
+	health                  HealthChecker
+	cors                    map[string]struct{}
+	oauthSuccessRedirectURL string
 
 	authLimiter *rateLimiter
 }
@@ -77,12 +79,13 @@ func NewRouter(deps Dependencies) http.Handler {
 	}
 
 	server := &Server{
-		auth:     deps.Auth,
-		tasks:    deps.Tasks,
-		diag:     deps.Diagnostic,
-		progress: deps.Progress,
-		health:   deps.Health,
-		cors:     make(map[string]struct{}),
+		auth:                    deps.Auth,
+		tasks:                   deps.Tasks,
+		diag:                    deps.Diagnostic,
+		progress:                deps.Progress,
+		health:                  deps.Health,
+		cors:                    make(map[string]struct{}),
+		oauthSuccessRedirectURL: strings.TrimSpace(deps.OAuthSuccessRedirectURL),
 
 		authLimiter: newRateLimiter(authRateLimitRequests, authRateLimitWindow),
 	}

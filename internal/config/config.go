@@ -10,24 +10,25 @@ import (
 )
 
 type Config struct {
-	Port                  string
-	DatabaseURL           string
-	AuthSecret            string
-	TokenTTL              time.Duration
-	AuthRateLimitRequests int
-	AuthRateLimitWindow   time.Duration
-	CORSAllowedOrigins    []string
-	GoogleClientID        string
-	GoogleClientSecret    string
-	GoogleRedirectURL     string
-	YandexClientID        string
-	YandexClientSecret    string
-	YandexRedirectURL     string
-	AITunnelBaseURL       string
-	AITunnelAPIKey        string
-	AITunnelModel         string
-	PreparedTasksMin      int
-	PreparedTasksInterval time.Duration
+	Port                    string
+	DatabaseURL             string
+	AuthSecret              string
+	TokenTTL                time.Duration
+	AuthRateLimitRequests   int
+	AuthRateLimitWindow     time.Duration
+	CORSAllowedOrigins      []string
+	GoogleClientID          string
+	GoogleClientSecret      string
+	GoogleRedirectURL       string
+	YandexClientID          string
+	YandexClientSecret      string
+	YandexRedirectURL       string
+	OAuthSuccessRedirectURL string
+	AITunnelBaseURL         string
+	AITunnelAPIKey          string
+	AITunnelModel           string
+	PreparedTasksMin        int
+	PreparedTasksInterval   time.Duration
 }
 
 func Load(path string) (Config, error) {
@@ -103,24 +104,25 @@ func Load(path string) (Config, error) {
 	}
 
 	return Config{
-		Port:                  port,
-		DatabaseURL:           strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		AuthSecret:            strings.TrimSpace(os.Getenv("AUTH_SECRET")),
-		TokenTTL:              tokenTTL,
-		AuthRateLimitRequests: rateLimitRequests,
-		AuthRateLimitWindow:   rateLimitWindow,
-		CORSAllowedOrigins:    origins,
-		GoogleClientID:        strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
-		GoogleClientSecret:    strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
-		GoogleRedirectURL:     strings.TrimSpace(os.Getenv("GOOGLE_REDIRECT_URL")),
-		YandexClientID:        strings.TrimSpace(os.Getenv("YANDEX_CLIENT_ID")),
-		YandexClientSecret:    strings.TrimSpace(os.Getenv("YANDEX_CLIENT_SECRET")),
-		YandexRedirectURL:     strings.TrimSpace(os.Getenv("YANDEX_REDIRECT_URL")),
-		AITunnelBaseURL:       envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
-		AITunnelAPIKey:        strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
-		AITunnelModel:         strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
-		PreparedTasksMin:      preparedTasksMin,
-		PreparedTasksInterval: preparedTasksInterval,
+		Port:                    port,
+		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		AuthSecret:              strings.TrimSpace(os.Getenv("AUTH_SECRET")),
+		TokenTTL:                tokenTTL,
+		AuthRateLimitRequests:   rateLimitRequests,
+		AuthRateLimitWindow:     rateLimitWindow,
+		CORSAllowedOrigins:      origins,
+		GoogleClientID:          strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		GoogleClientSecret:      strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
+		GoogleRedirectURL:       strings.TrimSpace(os.Getenv("GOOGLE_REDIRECT_URL")),
+		YandexClientID:          strings.TrimSpace(os.Getenv("YANDEX_CLIENT_ID")),
+		YandexClientSecret:      strings.TrimSpace(os.Getenv("YANDEX_CLIENT_SECRET")),
+		YandexRedirectURL:       strings.TrimSpace(os.Getenv("YANDEX_REDIRECT_URL")),
+		OAuthSuccessRedirectURL: strings.TrimSpace(os.Getenv("OAUTH_SUCCESS_REDIRECT_URL")),
+		AITunnelBaseURL:         envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
+		AITunnelAPIKey:          strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
+		AITunnelModel:           strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
+		PreparedTasksMin:        preparedTasksMin,
+		PreparedTasksInterval:   preparedTasksInterval,
 	}, nil
 }
 
@@ -151,6 +153,9 @@ func (c Config) ValidateServer() error {
 	}
 	if err := validateOAuthProvider("YANDEX", c.YandexClientID, c.YandexClientSecret, c.YandexRedirectURL); err != nil {
 		return err
+	}
+	if c.OAuthSuccessRedirectURL != "" && !strings.HasPrefix(c.OAuthSuccessRedirectURL, "http://") && !strings.HasPrefix(c.OAuthSuccessRedirectURL, "https://") {
+		return errors.New("OAUTH_SUCCESS_REDIRECT_URL must start with http:// or https://")
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
 		return errors.New("PORT must be a number")

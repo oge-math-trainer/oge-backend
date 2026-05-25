@@ -35,6 +35,8 @@ services:
         sync: false
       - key: YANDEX_REDIRECT_URL
         sync: false
+      - key: OAUTH_SUCCESS_REDIRECT_URL
+        value: https://oge-frontend.onrender.com/auth/callback
       - key: AITUNNEL_BASE_URL
         value: https://api.aitunnel.ru/v1
       - key: AITUNNEL_API_KEY

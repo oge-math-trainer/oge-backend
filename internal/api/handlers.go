@@ -3,9 +3,12 @@ package api
 import (
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
+	"github.com/oge-math-trainer/oge-backend.git/internal/auth"
 	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
@@ -125,7 +128,29 @@ func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	if s.oauthSuccessRedirectURL != "" {
+		redirectURL, err := oauthSuccessURL(s.oauthSuccessRedirectURL, session)
+		if err != nil {
+			writeError(w, r, err)
+			return
+		}
+		http.Redirect(w, r, redirectURL, http.StatusFound)
+		return
+	}
 	writeSuccess(w, http.StatusOK, session)
+}
+
+func oauthSuccessURL(baseURL string, session auth.Session) (string, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return "", app.Internal(err)
+	}
+	values := url.Values{}
+	values.Set("token", session.Token)
+	values.Set("user_id", strconv.FormatInt(session.User.ID, 10))
+	values.Set("email", session.User.Email)
+	parsed.Fragment = values.Encode()
+	return parsed.String(), nil
 }
 
 func logAuthFailure(r *http.Request, action string, err error) {

@@ -84,14 +84,15 @@ func main() {
 	}
 
 	router := api.NewRouter(api.Dependencies{
-		Auth:                  authService,
-		Tasks:                 taskService,
-		Diagnostic:            diagnosticService,
-		Progress:              progressService,
-		Health:                store,
-		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
-		AuthRateLimitRequests: cfg.AuthRateLimitRequests,
-		AuthRateLimitWindow:   cfg.AuthRateLimitWindow,
+		Auth:                    authService,
+		Tasks:                   taskService,
+		Diagnostic:              diagnosticService,
+		Progress:                progressService,
+		Health:                  store,
+		CORSAllowedOrigins:      cfg.CORSAllowedOrigins,
+		OAuthSuccessRedirectURL: cfg.OAuthSuccessRedirectURL,
+		AuthRateLimitRequests:   cfg.AuthRateLimitRequests,
+		AuthRateLimitWindow:     cfg.AuthRateLimitWindow,
 	})
 
 	server := &http.Server{
