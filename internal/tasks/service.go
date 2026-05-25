@@ -225,7 +225,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		if err := validateGeneratedContent(preparedTarget, &content); err != nil {
 			log.Printf("task generate cache item rejected: user_id=%d mode=%s target=%d/%s prepared_id=%d error=%v",
 				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, preparedTask.ID, err)
-			return Task{}, app.TaskUnavailable("Готовые уникальные задачи для этой темы еще готовятся")
+			return s.generateOnDemand(ctx, req, target)
 		}
 
 		task, err := s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), preparedTarget, content, preparedTask.Source))
@@ -242,7 +242,7 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 
 	log.Printf("task generate cache exhausted by duplicates: user_id=%d mode=%s target=%d/%s attempts=%d",
 		req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, maxPreparedAttempts)
-	return Task{}, app.TaskUnavailable("Готовые уникальные задачи для этой темы еще готовятся")
+	return s.generateOnDemand(ctx, req, target)
 }
 
 func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, target Target) (Task, error) {
