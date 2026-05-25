@@ -16,6 +16,7 @@ import (
 	"github.com/oge-math-trainer/oge-backend.git/internal/config"
 	"github.com/oge-math-trainer/oge-backend.git/internal/db"
 	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
+	"github.com/oge-math-trainer/oge-backend.git/internal/mail"
 	"github.com/oge-math-trainer/oge-backend.git/internal/progress"
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
 )
@@ -67,6 +68,19 @@ func main() {
 			RedirectURL:  cfg.YandexRedirectURL,
 		},
 	})
+	if cfg.SMTPHost != "" {
+		authService.ConfigurePasswordReset(mail.NewSMTPMailer(mail.SMTPConfig{
+			Host:      cfg.SMTPHost,
+			Port:      cfg.SMTPPort,
+			Username:  cfg.SMTPUsername,
+			Password:  cfg.SMTPPassword,
+			FromEmail: cfg.SMTPFromEmail,
+			FromName:  cfg.SMTPFromName,
+		}), cfg.PasswordResetCodeTTL)
+		log.Print("password reset email: configured")
+	} else {
+		log.Print("password reset email: disabled (SMTP_HOST is empty)")
+	}
 	taskService := tasks.NewService(store, aiClient)
 	diagnosticService := diagnostic.NewService(store, taskService, aiClient)
 	progressService := progress.NewService(store)

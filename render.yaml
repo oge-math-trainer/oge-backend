@@ -37,6 +37,20 @@ services:
         sync: false
       - key: OAUTH_SUCCESS_REDIRECT_URL
         value: https://oge-frontend.onrender.com/auth/callback
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: SMTP_FROM_NAME
+        value: ОГЭ по математике
+      - key: PASSWORD_RESET_CODE_TTL
+        value: 15m
       - key: AITUNNEL_BASE_URL
         value: https://api.aitunnel.ru/v1
       - key: AITUNNEL_API_KEY

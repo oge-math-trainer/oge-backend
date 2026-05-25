@@ -3,6 +3,7 @@ package config
 import (
 	"bufio"
 	"errors"
+	stdmail "net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -24,6 +25,13 @@ type Config struct {
 	YandexClientSecret      string
 	YandexRedirectURL       string
 	OAuthSuccessRedirectURL string
+	SMTPHost                string
+	SMTPPort                int
+	SMTPUsername            string
+	SMTPPassword            string
+	SMTPFromEmail           string
+	SMTPFromName            string
+	PasswordResetCodeTTL    time.Duration
 	AITunnelBaseURL         string
 	AITunnelAPIKey          string
 	AITunnelModel           string
@@ -65,6 +73,15 @@ func Load(path string) (Config, error) {
 		rateLimitWindow = parsed
 	}
 
+	passwordResetCodeTTL := 15 * time.Minute
+	if raw := strings.TrimSpace(os.Getenv("PASSWORD_RESET_CODE_TTL")); raw != "" {
+		parsed, err := time.ParseDuration(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		passwordResetCodeTTL = parsed
+	}
+
 	origins := splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS"))
 	if len(origins) == 0 {
 		origins = []string{
@@ -103,6 +120,26 @@ func Load(path string) (Config, error) {
 		port = "8080"
 	}
 
+	smtpHost := strings.TrimSpace(os.Getenv("SMTP_HOST"))
+	smtpUsername := strings.TrimSpace(os.Getenv("SMTP_USERNAME"))
+	smtpPassword := strings.TrimSpace(os.Getenv("SMTP_PASSWORD"))
+	smtpFromEmail := strings.TrimSpace(os.Getenv("SMTP_FROM_EMAIL"))
+	if smtpFromEmail == "" && strings.Contains(smtpUsername, "@") {
+		smtpFromEmail = smtpUsername
+	}
+	smtpFromName := envOrDefault("SMTP_FROM_NAME", "ОГЭ по математике")
+	smtpPort := 0
+	if smtpHost != "" || smtpUsername != "" || smtpPassword != "" || smtpFromEmail != "" {
+		smtpPort = 587
+	}
+	if raw := strings.TrimSpace(os.Getenv("SMTP_PORT")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil {
+			return Config{}, err
+		}
+		smtpPort = parsed
+	}
+
 	return Config{
 		Port:                    port,
 		DatabaseURL:             strings.TrimSpace(os.Getenv("DATABASE_URL")),
@@ -118,6 +155,13 @@ func Load(path string) (Config, error) {
 		YandexClientSecret:      strings.TrimSpace(os.Getenv("YANDEX_CLIENT_SECRET")),
 		YandexRedirectURL:       strings.TrimSpace(os.Getenv("YANDEX_REDIRECT_URL")),
 		OAuthSuccessRedirectURL: strings.TrimSpace(os.Getenv("OAUTH_SUCCESS_REDIRECT_URL")),
+		SMTPHost:                smtpHost,
+		SMTPPort:                smtpPort,
+		SMTPUsername:            smtpUsername,
+		SMTPPassword:            smtpPassword,
+		SMTPFromEmail:           smtpFromEmail,
+		SMTPFromName:            smtpFromName,
+		PasswordResetCodeTTL:    passwordResetCodeTTL,
 		AITunnelBaseURL:         envOrDefault("AITUNNEL_BASE_URL", "https://api.aitunnel.ru/v1"),
 		AITunnelAPIKey:          strings.TrimSpace(os.Getenv("AITUNNEL_API_KEY")),
 		AITunnelModel:           strings.TrimSpace(os.Getenv("AITUNNEL_MODEL")),
@@ -156,6 +200,12 @@ func (c Config) ValidateServer() error {
 	}
 	if c.OAuthSuccessRedirectURL != "" && !strings.HasPrefix(c.OAuthSuccessRedirectURL, "http://") && !strings.HasPrefix(c.OAuthSuccessRedirectURL, "https://") {
 		return errors.New("OAUTH_SUCCESS_REDIRECT_URL must start with http:// or https://")
+	}
+	if c.PasswordResetCodeTTL <= 0 {
+		return errors.New("PASSWORD_RESET_CODE_TTL must be positive")
+	}
+	if err := validateSMTP(c); err != nil {
+		return err
 	}
 	if _, err := strconv.Atoi(c.Port); err != nil {
 		return errors.New("PORT must be a number")
@@ -235,6 +285,35 @@ func validateOAuthProvider(prefix, clientID, clientSecret, redirectURL string) e
 	}
 	if !strings.HasPrefix(redirectURL, "http://") && !strings.HasPrefix(redirectURL, "https://") {
 		return errors.New(prefix + "_REDIRECT_URL must start with http:// or https://")
+	}
+	return nil
+}
+
+func validateSMTP(c Config) error {
+	values := []string{c.SMTPHost, c.SMTPUsername, c.SMTPPassword, c.SMTPFromEmail}
+	filled := 0
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			filled++
+		}
+	}
+	if filled == 0 && c.SMTPPort == 0 {
+		return nil
+	}
+	if c.SMTPHost == "" {
+		return errors.New("SMTP_HOST is required when password reset email is enabled")
+	}
+	if c.SMTPPort <= 0 {
+		return errors.New("SMTP_PORT must be positive")
+	}
+	if (c.SMTPUsername == "") != (c.SMTPPassword == "") {
+		return errors.New("SMTP_USERNAME and SMTP_PASSWORD must be set together")
+	}
+	if c.SMTPFromEmail == "" {
+		return errors.New("SMTP_FROM_EMAIL is required when password reset email is enabled")
+	}
+	if _, err := stdmail.ParseAddress(c.SMTPFromEmail); err != nil {
+		return errors.New("SMTP_FROM_EMAIL must be a valid email")
 	}
 	return nil
 }
