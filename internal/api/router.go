@@ -15,8 +15,6 @@ import (
 type AuthService interface {
 	Register(ctx context.Context, email, password string) (auth.Session, error)
 	Login(ctx context.Context, email, password string) (auth.Session, error)
-	RequestPasswordReset(ctx context.Context, email string) error
-	ResetPassword(ctx context.Context, email, code, password string) (auth.Session, error)
 	OAuthStart(ctx context.Context, provider string) (auth.OAuthStart, error)
 	OAuthCallback(ctx context.Context, provider, code, state string) (auth.Session, error)
 	Me(ctx context.Context, userID int64) (auth.User, error)
@@ -104,8 +102,6 @@ func NewRouter(deps Dependencies) http.Handler {
 
 	mux.Handle("POST /api/v1/auth/register", server.authRateLimit(http.HandlerFunc(server.handleRegister)))
 	mux.Handle("POST /api/v1/auth/login", server.authRateLimit(http.HandlerFunc(server.handleLogin)))
-	mux.Handle("POST /api/v1/auth/password/forgot", server.authRateLimit(http.HandlerFunc(server.handlePasswordForgot)))
-	mux.Handle("POST /api/v1/auth/password/reset", server.authRateLimit(http.HandlerFunc(server.handlePasswordReset)))
 	mux.Handle("GET /api/v1/auth/oauth/{provider}/start", server.authRateLimit(http.HandlerFunc(server.handleOAuthStart)))
 	mux.Handle("GET /api/v1/auth/oauth/{provider}/callback", server.authRateLimit(http.HandlerFunc(server.handleOAuthCallback)))
 

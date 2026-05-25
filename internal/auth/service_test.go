@@ -82,54 +82,6 @@ func TestRegisterDuplicateEmailReturnsConflict(t *testing.T) {
 	}
 }
 
-func TestPasswordResetSendsCodeAndUpdatesPassword(t *testing.T) {
-	repo := newMemoryRepo()
-	service := NewService(repo, "test-secret", time.Hour)
-	mailer := &fakeResetMailer{}
-	service.ConfigurePasswordReset(mailer, 15*time.Minute)
-
-	if _, err := service.Register(context.Background(), "student@example.com", "old-password"); err != nil {
-		t.Fatalf("Register returned error: %v", err)
-	}
-	if err := service.RequestPasswordReset(context.Background(), "student@example.com"); err != nil {
-		t.Fatalf("RequestPasswordReset returned error: %v", err)
-	}
-	if mailer.email != "student@example.com" {
-		t.Fatalf("expected reset email, got %q", mailer.email)
-	}
-	if len(mailer.code) != 6 {
-		t.Fatalf("expected six digit code, got %q", mailer.code)
-	}
-
-	session, err := service.ResetPassword(context.Background(), "student@example.com", mailer.code, "new-password")
-	if err != nil {
-		t.Fatalf("ResetPassword returned error: %v", err)
-	}
-	if session.Token == "" {
-		t.Fatal("expected token")
-	}
-
-	if _, err := service.Login(context.Background(), "student@example.com", "old-password"); err == nil {
-		t.Fatal("expected old password to be rejected")
-	}
-	if _, err := service.Login(context.Background(), "student@example.com", "new-password"); err != nil {
-		t.Fatalf("expected login with new password: %v", err)
-	}
-}
-
-func TestPasswordResetDoesNotSendEmailForUnknownUser(t *testing.T) {
-	service := NewService(newMemoryRepo(), "test-secret", time.Hour)
-	mailer := &fakeResetMailer{}
-	service.ConfigurePasswordReset(mailer, 15*time.Minute)
-
-	if err := service.RequestPasswordReset(context.Background(), "unknown@example.com"); err != nil {
-		t.Fatalf("RequestPasswordReset returned error: %v", err)
-	}
-	if mailer.email != "" || mailer.code != "" {
-		t.Fatalf("expected no email to be sent, got email=%q code=%q", mailer.email, mailer.code)
-	}
-}
-
 func TestOAuthStartBuildsGoogleAuthorizationURL(t *testing.T) {
 	service := NewService(newMemoryRepo(), "test-secret", time.Hour)
 	service.ConfigureOAuth(OAuthConfig{
@@ -211,7 +163,6 @@ type memoryRepo struct {
 	usersByID    map[int64]UserWithPassword
 	usersByEmail map[string]UserWithPassword
 	identities   map[string]int64
-	resetCodes   []passwordResetRecord
 }
 
 func newMemoryRepo() *memoryRepo {
@@ -220,29 +171,7 @@ func newMemoryRepo() *memoryRepo {
 		usersByID:    map[int64]UserWithPassword{},
 		usersByEmail: map[string]UserWithPassword{},
 		identities:   map[string]int64{},
-		resetCodes:   []passwordResetRecord{},
 	}
-}
-
-type passwordResetRecord struct {
-	UserID    int64
-	CodeHash  string
-	ExpiresAt time.Time
-	UsedAt    *time.Time
-	CreatedAt time.Time
-}
-
-type fakeResetMailer struct {
-	email     string
-	code      string
-	expiresAt time.Time
-}
-
-func (m *fakeResetMailer) SendPasswordResetCode(_ context.Context, email, code string, expiresAt time.Time) error {
-	m.email = email
-	m.code = code
-	m.expiresAt = expiresAt
-	return nil
 }
 
 func (r *memoryRepo) CreateUser(_ context.Context, email, passwordHash string) (User, error) {
@@ -298,45 +227,6 @@ func (r *memoryRepo) FindOrCreateOAuthUser(_ context.Context, identity OAuthIden
 	r.usersByEmail[user.Email] = user
 	r.identities[key] = user.ID
 	return user.User, nil
-}
-
-func (r *memoryRepo) CreatePasswordResetCode(_ context.Context, email, codeHash string, expiresAt time.Time) (bool, error) {
-	user, exists := r.usersByEmail[email]
-	if !exists {
-		return false, nil
-	}
-	now := time.Now()
-	for i := range r.resetCodes {
-		if r.resetCodes[i].UserID == user.ID && r.resetCodes[i].UsedAt == nil {
-			r.resetCodes[i].UsedAt = &now
-		}
-	}
-	r.resetCodes = append(r.resetCodes, passwordResetRecord{
-		UserID:    user.ID,
-		CodeHash:  codeHash,
-		ExpiresAt: expiresAt,
-		CreatedAt: now,
-	})
-	return true, nil
-}
-
-func (r *memoryRepo) ResetPasswordWithCode(_ context.Context, email, codeHash, passwordHash string, now time.Time) (User, error) {
-	user, exists := r.usersByEmail[email]
-	if !exists {
-		return User{}, app.Unauthorized("Invalid or expired password reset code")
-	}
-	for i := len(r.resetCodes) - 1; i >= 0; i-- {
-		code := &r.resetCodes[i]
-		if code.UserID != user.ID || code.CodeHash != codeHash || code.UsedAt != nil || !code.ExpiresAt.After(now) {
-			continue
-		}
-		code.UsedAt = &now
-		user.PasswordHash = passwordHash
-		r.usersByID[user.ID] = user
-		r.usersByEmail[user.Email] = user
-		return user.User, nil
-	}
-	return User{}, app.Unauthorized("Invalid or expired password reset code")
 }
 
 func (r *memoryRepo) GetUserByID(_ context.Context, id int64) (User, error) {

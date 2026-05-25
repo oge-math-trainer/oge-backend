@@ -2,13 +2,8 @@ package auth
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,8 +31,6 @@ type Repository interface {
 	GetUserByEmail(ctx context.Context, email string) (UserWithPassword, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
 	FindOrCreateOAuthUser(ctx context.Context, identity OAuthIdentity) (User, error)
-	CreatePasswordResetCode(ctx context.Context, email, codeHash string, expiresAt time.Time) (bool, error)
-	ResetPasswordWithCode(ctx context.Context, email, codeHash, passwordHash string, now time.Time) (User, error)
 }
 
 type UserWithPassword struct {
@@ -51,41 +44,27 @@ type OAuthIdentity struct {
 	Email          string
 }
 
-type PasswordResetMailer interface {
-	SendPasswordResetCode(ctx context.Context, email, code string, expiresAt time.Time) error
-}
-
 type Service struct {
-	repo             Repository
-	secret           string
-	ttl              time.Duration
-	now              func() time.Time
-	httpClient       *http.Client
-	oauth            OAuthConfig
-	resetMailer      PasswordResetMailer
-	passwordResetTTL time.Duration
+	repo       Repository
+	secret     string
+	ttl        time.Duration
+	now        func() time.Time
+	httpClient *http.Client
+	oauth      OAuthConfig
 }
 
 func NewService(repo Repository, authSecret string, tokenTTL time.Duration) *Service {
 	return &Service{
-		repo:             repo,
-		secret:           authSecret,
-		ttl:              tokenTTL,
-		now:              time.Now,
-		httpClient:       &http.Client{Timeout: 10 * time.Second},
-		passwordResetTTL: 15 * time.Minute,
+		repo:       repo,
+		secret:     authSecret,
+		ttl:        tokenTTL,
+		now:        time.Now,
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
 func (s *Service) ConfigureOAuth(config OAuthConfig) {
 	s.oauth = config
-}
-
-func (s *Service) ConfigurePasswordReset(mailer PasswordResetMailer, codeTTL time.Duration) {
-	s.resetMailer = mailer
-	if codeTTL > 0 {
-		s.passwordResetTTL = codeTTL
-	}
 }
 
 func (s *Service) Register(ctx context.Context, email, password string) (Session, error) {
@@ -134,57 +113,6 @@ func (s *Service) Login(ctx context.Context, email, password string) (Session, e
 
 func (s *Service) Me(ctx context.Context, userID int64) (User, error) {
 	return s.repo.GetUserByID(ctx, userID)
-}
-
-func (s *Service) RequestPasswordReset(ctx context.Context, email string) error {
-	if s.resetMailer == nil {
-		return app.Internal(errors.New("password reset mailer is not configured"))
-	}
-
-	normalizedEmail := normalizeEmail(email)
-	code, err := newPasswordResetCode()
-	if err != nil {
-		return err
-	}
-
-	expiresAt := s.now().Add(s.passwordResetTTL)
-	created, err := s.repo.CreatePasswordResetCode(ctx, normalizedEmail, s.passwordResetCodeHash(normalizedEmail, code), expiresAt)
-	if err != nil {
-		return err
-	}
-	if !created {
-		return nil
-	}
-
-	if err := s.resetMailer.SendPasswordResetCode(ctx, normalizedEmail, code, expiresAt); err != nil {
-		return app.Internal(err)
-	}
-	return nil
-}
-
-func (s *Service) ResetPassword(ctx context.Context, email, code, password string) (Session, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return Session{}, app.Internal(err)
-	}
-
-	normalizedEmail := normalizeEmail(email)
-	user, err := s.repo.ResetPasswordWithCode(
-		ctx,
-		normalizedEmail,
-		s.passwordResetCodeHash(normalizedEmail, normalizePasswordResetCode(code)),
-		string(hash),
-		s.now(),
-	)
-	if err != nil {
-		return Session{}, err
-	}
-
-	token, err := s.createToken(user.ID)
-	if err != nil {
-		return Session{}, err
-	}
-	return Session{Token: token, User: user}, nil
 }
 
 func (s *Service) ParseToken(token string) (int64, error) {
@@ -242,26 +170,6 @@ func (s *Service) createToken(userID int64) (string, error) {
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
-}
-
-func normalizePasswordResetCode(code string) string {
-	return strings.TrimSpace(code)
-}
-
-func newPasswordResetCode() (string, error) {
-	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
-	if err != nil {
-		return "", app.Internal(err)
-	}
-	return fmt.Sprintf("%06d", n.Int64()), nil
-}
-
-func (s *Service) passwordResetCodeHash(email, code string) string {
-	mac := hmac.New(sha256.New, []byte(s.secret))
-	_, _ = mac.Write([]byte(normalizeEmail(email)))
-	_, _ = mac.Write([]byte{0})
-	_, _ = mac.Write([]byte(normalizePasswordResetCode(code)))
-	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func isNotFound(err error) bool {

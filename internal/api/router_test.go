@@ -131,45 +131,6 @@ func TestOAuthCallbackReturnsSession(t *testing.T) {
 	assertJSONCode(t, resp.Body.Bytes(), "", true)
 }
 
-func TestPasswordForgotReturnsGenericSuccess(t *testing.T) {
-	router := testRouter(testDeps{})
-
-	resp := httptest.NewRecorder()
-	req := jsonRequest(http.MethodPost, "/api/v1/auth/password/forgot", `{"email":"a@example.com"}`)
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	assertJSONCode(t, resp.Body.Bytes(), "", true)
-}
-
-func TestPasswordResetReturnsSession(t *testing.T) {
-	router := testRouter(testDeps{})
-
-	resp := httptest.NewRecorder()
-	req := jsonRequest(http.MethodPost, "/api/v1/auth/password/reset", `{"email":"a@example.com","code":"123456","password":"password123"}`)
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d body=%s", resp.Code, resp.Body.String())
-	}
-	assertJSONCode(t, resp.Body.Bytes(), "", true)
-}
-
-func TestPasswordResetRejectsInvalidCode(t *testing.T) {
-	router := testRouter(testDeps{})
-
-	resp := httptest.NewRecorder()
-	req := jsonRequest(http.MethodPost, "/api/v1/auth/password/reset", `{"email":"a@example.com","code":"abc","password":"password123"}`)
-	router.ServeHTTP(resp, req)
-
-	if resp.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", resp.Code)
-	}
-	assertJSONCode(t, resp.Body.Bytes(), app.CodeValidation, false)
-}
-
 func TestRegisterRejectsPasswordLongerThanBcryptLimit(t *testing.T) {
 	router := testRouter(testDeps{})
 
@@ -336,14 +297,6 @@ func (fakeAuthService) Register(context.Context, string, string) (auth.Session, 
 }
 
 func (fakeAuthService) Login(context.Context, string, string) (auth.Session, error) {
-	return auth.Session{Token: "token", User: auth.User{ID: 1, Email: "a@example.com"}}, nil
-}
-
-func (fakeAuthService) RequestPasswordReset(context.Context, string) error {
-	return nil
-}
-
-func (fakeAuthService) ResetPassword(context.Context, string, string, string) (auth.Session, error) {
 	return auth.Session{Token: "token", User: auth.User{ID: 1, Email: "a@example.com"}}, nil
 }
 

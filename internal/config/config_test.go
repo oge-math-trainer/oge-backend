@@ -65,7 +65,6 @@ func TestValidateServerOKWithAITunnelConfig(t *testing.T) {
 		TokenTTL:              time.Hour,
 		AuthRateLimitRequests: 10,
 		AuthRateLimitWindow:   time.Minute,
-		PasswordResetCodeTTL:  15 * time.Minute,
 		AITunnelAPIKey:        "sk-aitunnel-test123",
 		AITunnelModel:         "gpt-4o-mini",
 		AITunnelBaseURL:       "https://api.aitunnel.ru/v1",
@@ -86,7 +85,6 @@ func TestValidateServerOKWithoutAI(t *testing.T) {
 		TokenTTL:              time.Hour,
 		AuthRateLimitRequests: 10,
 		AuthRateLimitWindow:   time.Minute,
-		PasswordResetCodeTTL:  15 * time.Minute,
 		// AI-поля не заданы — это допустимо
 	}
 

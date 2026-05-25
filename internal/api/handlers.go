@@ -18,16 +18,6 @@ type credentialsRequest struct {
 	Password string `json:"password"`
 }
 
-type passwordForgotRequest struct {
-	Email string `json:"email"`
-}
-
-type passwordResetRequest struct {
-	Email    string `json:"email"`
-	Code     string `json:"code"`
-	Password string `json:"password"`
-}
-
 type generateTaskRequest struct {
 	Mode        string `json:"mode"`
 	OgeNumber   *int   `json:"oge_number,omitempty"`
@@ -101,55 +91,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	session, err := s.auth.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
 		logAuthFailure(r, "login", err)
-		writeError(w, r, err)
-		return
-	}
-	writeSuccess(w, http.StatusOK, session)
-}
-
-func (s *Server) handlePasswordForgot(w http.ResponseWriter, r *http.Request) {
-	var req passwordForgotRequest
-	if err := decodeAuthJSON(w, r, &req); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if err := validateEmail(req.Email); err != nil {
-		writeError(w, r, err)
-		return
-	}
-
-	if err := s.auth.RequestPasswordReset(r.Context(), req.Email); err != nil {
-		logAuthFailure(r, "password_forgot", err)
-		writeError(w, r, err)
-		return
-	}
-	writeSuccess(w, http.StatusOK, map[string]string{
-		"message": "Если email зарегистрирован, код отправлен",
-	})
-}
-
-func (s *Server) handlePasswordReset(w http.ResponseWriter, r *http.Request) {
-	var req passwordResetRequest
-	if err := decodeAuthJSON(w, r, &req); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if err := validateEmail(req.Email); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if err := validateResetCode(req.Code); err != nil {
-		writeError(w, r, err)
-		return
-	}
-	if err := validatePassword(req.Password); err != nil {
-		writeError(w, r, err)
-		return
-	}
-
-	session, err := s.auth.ResetPassword(r.Context(), req.Email, req.Code, req.Password)
-	if err != nil {
-		logAuthFailure(r, "password_reset", err)
 		writeError(w, r, err)
 		return
 	}
