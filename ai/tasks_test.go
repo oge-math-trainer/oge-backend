@@ -21,6 +21,45 @@ func TestBuildGeneratePromptUsesCircleTangentsTemplate(t *testing.T) {
 	}
 }
 
+func TestTaskCatalogLoadsStringExamples(t *testing.T) {
+	catalog, err := loadCatalog()
+	if err != nil {
+		t.Fatalf("expected catalog to load: %v", err)
+	}
+	if len(catalog) == 0 {
+		t.Fatal("expected non-empty catalog")
+	}
+
+	entry := getCatalogEntry(tasks.Target{OgeNumber: 6, SubtypeCode: "fractions_common"})
+	if entry.Title == "" {
+		t.Fatal("expected catalog title for exact subtype")
+	}
+	if len(entry.Examples) == 0 {
+		t.Fatal("expected string examples to be decoded")
+	}
+}
+
+func TestBuildGeneratePromptUsesCatalogAlias(t *testing.T) {
+	prompt := buildGeneratePrompt(tasks.Target{OgeNumber: 6, SubtypeCode: "numbers_fractions"}, "")
+
+	if !strings.Contains(prompt, "Действия с обыкновенными дробями") {
+		t.Fatalf("expected aliased catalog title in prompt, got:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "Нахождение дроби от числа") {
+		t.Fatalf("expected aliased catalog description in prompt, got:\n%s", prompt)
+	}
+}
+
+func TestBuildGeneratePromptIncludesNoveltyFeedback(t *testing.T) {
+	prompt := buildGeneratePromptWithSeed(tasks.Target{OgeNumber: 9, SubtypeCode: "equations_linear"}, "duplicate prepared task", "seed-1")
+
+	for _, token := range []string{"Novelty requirements", "duplicate/conflict", "Variation seed: seed-1", "duplicate prepared task"} {
+		if !strings.Contains(prompt, token) {
+			t.Fatalf("expected prompt to mention %q", token)
+		}
+	}
+}
+
 func TestBuildGeneratePromptUsesSeparateGraphPlots(t *testing.T) {
 	prompt := buildGeneratePrompt(tasks.Target{OgeNumber: 11, SubtypeCode: "graphs_match"}, "")
 

@@ -5,9 +5,11 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/diagnostic"
 	"github.com/oge-math-trainer/oge-backend.git/internal/tasks"
@@ -16,17 +18,13 @@ import (
 //go:embed tasks_catalog.json
 var embeddedTaskCatalog []byte
 
-type exampleTask struct {
-	Question string `json:"question"`
-}
-
 type catalogEntry struct {
-	Title            string        `json:"title"`
-	Description      string        `json:"description"`
-	Example          string        `json:"example"`
-	Examples         []exampleTask `json:"examples"`
-	ForbiddenTopics  []string      `json:"forbidden_topics"`
-	RequiredKeywords []string      `json:"required_keywords"`
+	Title            string
+	Description      string
+	Example          string
+	Examples         []string
+	ForbiddenTopics  []string
+	RequiredKeywords []string
 }
 
 type sdamgiaTaskSpec struct {
@@ -42,7 +40,127 @@ var (
 	catalogErr  error
 )
 
+var catalogAliases = map[int]map[string]string{
+	6: {
+		"numbers_fractions": "fractions_common",
+		"numbers_decimal":   "fractions_decimal",
+		"numbers_integers":  "fractions_mixed",
+	},
+	7: {
+		"numberline_compare":  "number_line",
+		"numberline_plot":     "number_line",
+		"numbers_compare":     "compare_numbers",
+		"inequalities_simple": "simple_inequalities",
+	},
+	8: {
+		"algebra_powers":   "powers",
+		"algebra_roots":    "roots",
+		"algebra_formulas": "formulas_short",
+	},
+	9: {
+		"equations_linear":        "eq_linear",
+		"equations_quadratic":     "eq_quadratic",
+		"equations_rational":      "eq_rational",
+		"equations_system_linear": "eq_systems_linear",
+		"equations_system_mixed":  "eq_systems_linear",
+	},
+	10: {
+		"probability_classic": "prob_classic",
+		"probability_tree":    "prob_theorems",
+	},
+	11: {
+		"graphs_linear":        "graph_kb",
+		"graphs_linear_signs":  "graph_kb",
+		"graphs_quadratic":     "func_graph_match",
+		"graphs_inverse":       "func_graph_match",
+		"graphs_transform":     "func_graph_match",
+		"graphs_match":         "graph_formula_match",
+		"graphs_match_func":    "func_graph_match",
+		"graphs_match_formula": "graph_formula_match",
+	},
+	12: {
+		"formulas_subst":     "formula_calc",
+		"formulas_units":     "formula_calc",
+		"formulas_practical": "linear_eq_practical",
+		"formula_compute":    "formula_calc",
+		"formula_linear":     "linear_eq_practical",
+	},
+	14: {
+		"progression_arithm": "prog_arith",
+		"progression_geom":   "prog_geom",
+	},
+	15: {
+		"triangles_angles":   "tri_angles",
+		"triangles_pythagor": "tri_right",
+		"triangles_area":     "tri_general",
+		"triangles_lines":    "tri_general",
+	},
+	16: {
+		"circle_tangents": "circle_tangent_chord",
+		"circle_sector":   "circle_angles",
+	},
+	17: {
+		"quad_properties": "quad_parallelogram",
+		"quad_area":       "quad_rectangle",
+		"quad_diagonals":  "quad_rhombus",
+	},
+	18: {
+		"grid_distance": "geo_distance",
+		"grid_midline":  "geo_midline",
+		"grid_pythagor": "geo_pythagor",
+		"grid_area":     "geo_area",
+		"grid_length":   "geo_side_length",
+	},
+	19: {
+		"logic_angles": "logic_angles_lines",
+		"logic_quad":   "logic_quads",
+	},
+}
+
 var validAnswerRe = regexp.MustCompile(`^-?[0-9]+(,[0-9]+)?$`)
+
+func (e *catalogEntry) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Title            string            `json:"title"`
+		Description      string            `json:"description"`
+		Example          string            `json:"example"`
+		Examples         []json.RawMessage `json:"examples"`
+		ForbiddenTopics  []string          `json:"forbidden_topics"`
+		RequiredKeywords []string          `json:"required_keywords"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	*e = catalogEntry{
+		Title:            raw.Title,
+		Description:      raw.Description,
+		Example:          raw.Example,
+		ForbiddenTopics:  raw.ForbiddenTopics,
+		RequiredKeywords: raw.RequiredKeywords,
+	}
+	for _, item := range raw.Examples {
+		if example := decodeCatalogExample(item); example != "" {
+			e.Examples = append(e.Examples, example)
+		}
+	}
+	return nil
+}
+
+func decodeCatalogExample(item json.RawMessage) string {
+	var text string
+	if err := json.Unmarshal(item, &text); err == nil {
+		return strings.TrimSpace(text)
+	}
+
+	var objectExample struct {
+		Question string `json:"question"`
+	}
+	if err := json.Unmarshal(item, &objectExample); err == nil {
+		return strings.TrimSpace(objectExample.Question)
+	}
+	return ""
+}
 
 func loadCatalog() (map[string]map[string]catalogEntry, error) {
 	catalogOnce.Do(func() {
@@ -61,7 +179,23 @@ func getCatalogEntry(target tasks.Target) catalogEntry {
 	if byNumber == nil {
 		return catalogEntry{}
 	}
-	return byNumber[target.SubtypeCode]
+	if entry, ok := byNumber[target.SubtypeCode]; ok {
+		return entry
+	}
+	if alias := catalogAlias(target); alias != "" {
+		if entry, ok := byNumber[alias]; ok {
+			return entry
+		}
+	}
+	return catalogEntry{}
+}
+
+func catalogAlias(target tasks.Target) string {
+	byNumber := catalogAliases[target.OgeNumber]
+	if byNumber == nil {
+		return ""
+	}
+	return byNumber[strings.TrimSpace(target.SubtypeCode)]
 }
 
 func validateAnswer(answer string) error {
@@ -75,7 +209,58 @@ func validateAnswer(answer string) error {
 	return nil
 }
 
+func specSubtypeCode(target tasks.Target) string {
+	subtype := strings.TrimSpace(target.SubtypeCode)
+	switch subtype {
+	case "fractions_common":
+		return "numbers_fractions"
+	case "fractions_decimal":
+		return "numbers_decimal"
+	case "fractions_mixed":
+		return "numbers_fractions"
+	case "numberline_plot", "numbers_compare":
+		return "numberline_compare"
+	case "powers":
+		return "algebra_powers"
+	case "roots":
+		return "algebra_roots"
+	case "fsu", "formulas_short":
+		return "algebra_formulas"
+	case "eq_linear":
+		return "equations_linear"
+	case "eq_quadratic":
+		return "equations_quadratic"
+	case "eq_rational":
+		return "equations_rational"
+	case "eq_system_linear", "eq_systems_linear":
+		return "equations_system_linear"
+	case "prob_classic":
+		return "probability_classic"
+	case "prob_theorems":
+		return "probability_tree"
+	case "formula_compute":
+		return "formulas_subst"
+	case "formula_linear":
+		return "formulas_practical"
+	case "tri_angles":
+		return "triangles_angles"
+	case "tri_right":
+		return "triangles_pythagor"
+	case "tri_general", "tri_isosceles":
+		return "triangles_lines"
+	case "circle_tangent_chord":
+		return "circle_tangents"
+	case "quad_parallelogram", "quad_rectangle", "quad_rhombus":
+		return "quad_properties"
+	case "logic_quad":
+		return "logic_quads"
+	default:
+		return subtype
+	}
+}
+
 func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
+	subtype := specSubtypeCode(target)
 	spec := sdamgiaTaskSpec{
 		Forbidden:      "Не меняй номер задания и не уходи в соседние типы.",
 		TemplateMarker: fmt.Sprintf("oge_%d_%s", target.OgeNumber, target.SubtypeCode),
@@ -85,7 +270,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 6:
 		spec.Format = "Формат СДАМ ГИА №6: короткое задание на вычисление значения числового выражения."
 		spec.Forbidden = "Не генерируй уравнения, неравенства, вероятность, графики или геометрию."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "numbers_fractions":
 			spec.SubtypeInstruction = "Используй обыкновенные дроби, смешанные числа или дробь от числа. Ответ должен быть целым числом или десятичной дробью с запятой."
 		case "numbers_decimal":
@@ -100,7 +285,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 8:
 		spec.Format = "Формат СДАМ ГИА №8: упростить или вычислить алгебраическое выражение."
 		spec.Forbidden = "Не генерируй уравнение как №9 и неравенство как №13."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "algebra_powers":
 			spec.SubtypeInstruction = "Основная операция: свойства степеней с целым показателем."
 		case "algebra_roots":
@@ -113,7 +298,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 9:
 		spec.Format = "Формат СДАМ ГИА №9: решить уравнение или систему уравнений."
 		spec.Forbidden = "Не используй неравенства и геометрию."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "equations_linear":
 			spec.SubtypeInstruction = "Только линейное уравнение с одним неизвестным."
 		case "equations_quadratic":
@@ -128,11 +313,11 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 10:
 		spec.Format = "Формат СДАМ ГИА №10: вероятность случайного события."
 		spec.Forbidden = "Не используй уравнения, неравенства, графики или геометрию."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "probability_classic":
-			spec.SubtypeInstruction = "Используй классическую вероятность: билеты, шары, кубик, монета, карточки."
+			spec.SubtypeInstruction = "Используй классическую вероятность: билеты, шары, кубик, монета, карточки. Подбирай числа так, чтобы ответ был конечной десятичной дробью с запятой, например 0,25 или 0,4."
 		case "probability_tree":
-			spec.SubtypeInstruction = "Используй два независимых или последовательных случайных события, но без рисунка дерева."
+			spec.SubtypeInstruction = "Используй два независимых или последовательных случайных события, но без рисунка дерева. Подбирай числа так, чтобы ответ был конечной десятичной дробью с запятой."
 		}
 	case 11:
 		spec.Format = "Формат СДАМ ГИА №11: по графикам функций установить соответствие или определить параметры."
@@ -141,7 +326,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 12:
 		spec.Format = "Формат СДАМ ГИА №12: вычислить значение по готовой формуле."
 		spec.Forbidden = "Не проси решить уравнение как самостоятельную цель."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "formulas_subst":
 			spec.SubtypeInstruction = "Дай формулу и значения переменных; нужно вычислить результат."
 		case "formulas_units":
@@ -155,7 +340,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 		spec.Forbidden = "Не используй уравнения без знаков неравенства."
 	case 14:
 		spec.Format = "Формат СДАМ ГИА №14: арифметическая или геометрическая прогрессия, часто практическая текстовая задача."
-		if target.SubtypeCode == "progression_geom" {
+		if subtype == "progression_geom" {
 			spec.SubtypeInstruction = "Используй геометрическую прогрессию: знаменатель, последовательное изменение, рост или уменьшение."
 		} else {
 			spec.SubtypeInstruction = "Используй арифметическую прогрессию: разность, номер члена или сумма первых членов."
@@ -164,11 +349,11 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 15:
 		spec.Format = "Формат СДАМ ГИА №15: планиметрия по треугольнику, обычно с чертежом."
 		spec.Forbidden = "Не используй окружность как главную тему №16 и четырёхугольники как №17."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "triangles_angles":
 			spec.SubtypeInstruction = "Работай с углами треугольника, внешним углом или равнобедренным треугольником."
 		case "triangles_pythagor":
-			spec.SubtypeInstruction = "Работай с прямоугольным треугольником и теоремой Пифагора."
+			spec.SubtypeInstruction = "Работай с прямоугольным треугольником и теоремой Пифагора. Подбирай пифагоровы тройки, чтобы correct_answer был целым числом без приближений."
 		case "triangles_area":
 			spec.SubtypeInstruction = "Работай с площадью треугольника, основанием и высотой."
 		case "triangles_lines":
@@ -177,7 +362,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 16:
 		spec.Format = "Формат СДАМ ГИА №16: окружность и её элементы, обычно с чертежом."
 		spec.Forbidden = "Не генерируй задачу только про треугольник, трапецию или прямоугольник."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "circle_elements":
 			spec.SubtypeInstruction = "Работай с радиусом, диаметром, хордой, расстоянием от центра до хорды, длиной окружности или площадью круга."
 		case "circle_angles":
@@ -193,7 +378,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 	case 17:
 		spec.Format = "Формат СДАМ ГИА №17: свойства, диагонали или площадь четырёхугольника, обычно с чертежом."
 		spec.Forbidden = "Не генерируй задачу про одну окружность как №16 и клетчатую бумагу как №18."
-		switch target.SubtypeCode {
+		switch subtype {
 		case "quad_properties":
 			spec.SubtypeInstruction = "Работай с параллелограммом, ромбом, прямоугольником или квадратом."
 		case "quad_trapezoid":
@@ -217,12 +402,13 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 }
 
 func buildGeneratePrompt(target tasks.Target, previousError string) string {
+	return buildGeneratePromptWithSeed(target, previousError, "")
+}
+
+func buildGeneratePromptWithSeed(target tasks.Target, previousError, variationSeed string) string {
 	entry := getCatalogEntry(target)
 	spec := sdamgiaSpec(target)
-	example := entry.Example
-	if example == "" && len(entry.Examples) > 0 {
-		example = entry.Examples[0].Question
-	}
+	example := selectCatalogExample(entry, variationSeed)
 
 	var forbidden []string
 	forbidden = append(forbidden, spec.Forbidden)
@@ -235,10 +421,14 @@ func buildGeneratePrompt(target tasks.Target, previousError string) string {
 	visualRule := visualPromptRule(target)
 	retryRule := ""
 	if strings.TrimSpace(previousError) != "" {
-		retryRule = "\nPrevious attempt was rejected. Fix this problem: " + previousError
+		retryRule = "\nPrevious attempt was rejected. Fix this problem: " + truncateFeedback(previousError)
+	}
+	seedRule := ""
+	if strings.TrimSpace(variationSeed) != "" {
+		seedRule = "\nVariation seed: " + strings.TrimSpace(variationSeed)
 	}
 
-	return fmt.Sprintf(`Generate exactly one new Russian OGE math task in SDAM GIA style.
+	return fmt.Sprintf(`Generate exactly one new Russian OGE math task in SDAM GIA / math-oge.sdamgia.ru style.
 
 Target:
 - oge_number: %d
@@ -249,6 +439,20 @@ Target:
 
 Reference example structure, do not copy it verbatim:
 %s
+
+Novelty requirements:
+- Create a genuinely new task for this generation.
+- Do not reuse the reference example's wording, story, numbers, graph coordinates, answer, or visual_data.
+- If a previous attempt was rejected as a duplicate/conflict, change the scenario and all key numeric values, not just punctuation.
+- Prefer simple integer arithmetic and one unambiguous checked answer.%s
+
+Arithmetic consistency rules:
+- Solve the task completely before returning JSON.
+- correct_answer must be exactly the final numeric result from solution_steps.
+- The last solution step must explicitly end with "Ответ: <correct_answer>." using the same value as correct_answer.
+- Do not use approximate answers. If the natural answer is a fraction, irrational value, or rounded number, change the task numbers so the answer fits the allowed correct_answer regex.
+- For probability tasks, return a decimal probability between 0 and 1 with comma as decimal separator, not "m,n" for a fraction m/n.
+- A separate worker reviewer will reject the task if arithmetic, options, visual_data, or correct_answer are inconsistent.
 
 Required SDAM GIA format:
 %s
@@ -268,6 +472,7 @@ Return ONLY valid JSON with this shape:
   "is_valid": true,
   "validation_notes": ""
 }
+If visual_data is required below, include it as an additional JSON field named "visual_data"; otherwise omit it.
 
 Strict answer rules:
 - correct_answer must match ^-?[0-9]+(,[0-9]+)?$
@@ -276,7 +481,7 @@ Strict answer rules:
 
 Text rules:
 - All user-facing text must be in Russian.
-- Use LaTeX.
+- Use LaTeX for formulas and escape JSON backslashes correctly.
 - Do not put TikZ, PGFPlots, \draw, \node, \foreach, \begin{axis}, or other drawing code in question, solution_steps, or self_check. Diagrams must be described only in visual_data.
 - Create a new task in the same format; do not copy SDAM GIA examples verbatim.
 
@@ -287,12 +492,44 @@ Text rules:
 		nonEmpty(entry.Description, "no catalog description"),
 		spec.TemplateMarker,
 		nonEmpty(example, "no catalog example"),
+		seedRule,
 		spec.Format,
 		strings.Join(nonEmptySlice(required), "\n"),
 		strings.Join(nonEmptySlice(forbidden), "\n"),
 		visualRule,
 		retryRule,
 	)
+}
+
+func selectCatalogExample(entry catalogEntry, variationSeed string) string {
+	examples := catalogExamples(entry)
+	if len(examples) == 0 {
+		return ""
+	}
+	if strings.TrimSpace(variationSeed) == "" {
+		return examples[0]
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(variationSeed))
+	return examples[int(h.Sum32())%len(examples)]
+}
+
+func catalogExamples(entry catalogEntry) []string {
+	seen := make(map[string]struct{})
+	examples := make([]string, 0, len(entry.Examples)+1)
+	for _, value := range append([]string{entry.Example}, entry.Examples...) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		examples = append(examples, value)
+	}
+	return examples
 }
 
 func visualPromptRule(target tasks.Target) string {
@@ -311,7 +548,7 @@ The interval and points must match the condition and the correct option.`
 		return `Required visual_data:
 Add "visual_data" using this schema:
 {"type":"geometry","shape":"triangle","vertices":[{"label":"A","x":0,"y":0},{"label":"B","x":6,"y":0},{"label":"C","x":0,"y":8}],"labels":{"A":"A","B":"B","C":"C"},"segments":[{"from":"A","to":"B","label":"6"},{"from":"A","to":"C","label":"8"},{"from":"B","to":"C"}]}
-For circle tasks use shape "circle_tangent", "circle_angles", "circle_chord" or "circle_sector" and you may add circles:[{"center":"O","through":"B"}].`
+visual_data.type must always be "geometry". For circle tasks put the circle kind only in shape: "circle_tangent", "circle_angles", "circle_chord" or "circle_sector"; you may add circles:[{"center":"O","through":"B"}].`
 	case tasks.VisualKindGrid:
 		return `Required visual_data:
 Add "visual_data" using this schema:
@@ -391,7 +628,7 @@ func (c *Client) IsConfigured() bool {
 	return c != nil && strings.TrimSpace(c.apiKey) != "" && strings.TrimSpace(c.baseURL) != "" && strings.TrimSpace(c.model) != ""
 }
 
-func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.GeneratedContent, error) {
+func (c *Client) GenerateTask(ctx context.Context, target tasks.Target, feedback string) (tasks.GeneratedContent, error) {
 	if target.OgeNumber < 6 || target.OgeNumber > 19 {
 		return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: oge_number must be between 6 and 19")
 	}
@@ -406,8 +643,8 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 		default:
 		}
 
-		prompt := buildGeneratePrompt(target, errorText(lastErr))
-		raw, err := c.Chat(systemPrompt, prompt, 2200, 0.25)
+		prompt := buildGeneratePromptWithSeed(target, generationFeedback(feedback, lastErr), generationVariationSeed(target, attempt))
+		raw, err := c.Chat(systemPrompt, prompt, generationMaxTokens(target), generationTemperature(target))
 		if err != nil {
 			lastErr = err
 			continue
@@ -434,11 +671,108 @@ func (c *Client) GenerateTask(ctx context.Context, target tasks.Target) (tasks.G
 	return tasks.GeneratedContent{}, fmt.Errorf("GenerateTask: AI returned no valid task")
 }
 
+func generationFeedback(feedback string, err error) string {
+	feedback = strings.TrimSpace(feedback)
+	errText := errorText(err)
+	switch {
+	case feedback != "" && errText != "":
+		return feedback + "; " + errText
+	case feedback != "":
+		return feedback
+	default:
+		return errText
+	}
+}
+
 func errorText(err error) string {
 	if err == nil {
 		return ""
 	}
 	return err.Error()
+}
+
+func generationVariationSeed(target tasks.Target, attempt int) string {
+	return fmt.Sprintf("%d:%s:%d:%d", target.OgeNumber, target.SubtypeCode, attempt, time.Now().UnixNano())
+}
+
+func generationMaxTokens(target tasks.Target) int {
+	if tasks.RequiresVisualData(target) {
+		return 3200
+	}
+	return 2200
+}
+
+func generationTemperature(target tasks.Target) float64 {
+	if tasks.RequiresVisualData(target) {
+		return 0.3
+	}
+	return 0.4
+}
+
+func truncateFeedback(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 700 {
+		return value
+	}
+	return value[:700] + "..."
+}
+
+func (c *Client) ReviewGeneratedTask(ctx context.Context, target tasks.Target, content tasks.GeneratedContent) (tasks.GenerationReview, error) {
+	select {
+	case <-ctx.Done():
+		return tasks.GenerationReview{}, ctx.Err()
+	default:
+	}
+
+	systemPrompt := `You are a strict verifier for Russian OGE math tasks.
+Return only valid JSON. No markdown. No text outside JSON.
+Check mathematical correctness, subtype fit, answer format, options, and visual_data consistency.`
+
+	type reviewInput struct {
+		Target  tasks.Target           `json:"target"`
+		Content tasks.GeneratedContent `json:"content"`
+	}
+	inputBytes, err := json.Marshal(reviewInput{
+		Target:  target,
+		Content: content,
+	})
+	if err != nil {
+		return tasks.GenerationReview{}, fmt.Errorf("ReviewGeneratedTask: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`Review this generated OGE math task before it is saved by the worker.
+
+Input JSON:
+%s
+
+Accept only if all checks pass:
+- The problem has exactly one correct answer.
+- content.correct_answer exactly matches the mathematically correct final answer.
+- solution_steps are mathematically valid and end with the same final answer.
+- correct_answer matches ^-?[0-9]+(,[0-9]+)?$ and uses comma for decimals.
+- For probability tasks, correct_answer is a decimal from 0 to 1, not a numerator/denominator pair.
+- For OGE 13, the question must contain answer options and correct_answer must be the correct option number.
+- For OGE 19, the question must contain exactly 3 statements and correct_answer must contain the numbers of all true statements in increasing order.
+- If visual_data is present or required, it must match the question and use the expected type.
+
+Return exactly this JSON:
+{"is_valid":true,"reason":"","correct_answer":"12"}
+
+If invalid, return:
+{"is_valid":false,"reason":"short concrete reason in Russian","correct_answer":"correct value if known, otherwise empty string"}`, string(inputBytes))
+
+	raw, err := c.Chat(systemPrompt, prompt, 700, 0)
+	if err != nil {
+		return tasks.GenerationReview{}, fmt.Errorf("ReviewGeneratedTask: %w", err)
+	}
+
+	var review tasks.GenerationReview
+	if err := decodeAIJSON(raw, &review); err != nil {
+		return tasks.GenerationReview{}, fmt.Errorf("ReviewGeneratedTask: could not parse AI JSON: %w", err)
+	}
+	review.Reason = strings.TrimSpace(review.Reason)
+	review.CorrectAnswer = strings.TrimSpace(review.CorrectAnswer)
+	return review, nil
 }
 
 func decodeAIJSON(raw string, dest any) error {

@@ -90,6 +90,12 @@ type GeneratedContent struct {
 	Graphs          []GraphInfo `json:"graphs,omitempty"`
 }
 
+type GenerationReview struct {
+	IsValid       bool   `json:"is_valid"`
+	Reason        string `json:"reason"`
+	CorrectAnswer string `json:"correct_answer"`
+}
+
 type CreateTask struct {
 	UserID          int64
 	Mode            string
@@ -162,7 +168,8 @@ type Repository interface {
 
 type AIClient interface {
 	IsConfigured() bool
-	GenerateTask(ctx context.Context, target Target) (GeneratedContent, error)
+	GenerateTask(ctx context.Context, target Target, feedback string) (GeneratedContent, error)
+	ReviewGeneratedTask(ctx context.Context, target Target, content GeneratedContent) (GenerationReview, error)
 	CheckAnswer(ctx context.Context, task Task, studentAnswer string) (CheckResult, error)
 	Hint(ctx context.Context, task Task) (HintResult, error)
 	Explain(ctx context.Context, task Task) (ExplainResult, error)
@@ -240,8 +247,9 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 
 func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, target Target) (Task, error) {
 	const maxAttempts = 3
+	feedback := ""
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		content, source, err := s.generateContent(ctx, target)
+		content, source, err := s.generateContent(ctx, target, feedback)
 		if err != nil {
 			return Task{}, err
 		}
@@ -255,6 +263,10 @@ func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, tar
 		if isAppConflict(err) {
 			log.Printf("task generate on-demand duplicate skipped: user_id=%d mode=%s target=%d/%s attempt=%d/%d",
 				req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, attempt, maxAttempts)
+			feedback = duplicateGeneratedFeedback
+			if source == "fallback" {
+				break
+			}
 			continue
 		}
 		return Task{}, err
@@ -317,10 +329,17 @@ func createPreparedTask(target Target, content GeneratedContent, source string) 
 
 func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask, error) {
 	const maxAttempts = 5
+	feedback := ""
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		content, source, err := s.generateContent(ctx, target)
+		content, source, err := s.generateContent(ctx, target, feedback)
 		if err != nil {
 			return PreparedTask{}, err
+		}
+		if err := s.reviewPreparedTask(ctx, target, content, source); err != nil {
+			log.Printf("prepared task review rejected: target=%d/%s attempt=%d/%d source=%s error=%v",
+				target.OgeNumber, target.SubtypeCode, attempt, maxAttempts, source, err)
+			feedback = mergeGenerationFeedback(workerReviewFeedback, err)
+			continue
 		}
 		prepared, err := s.repo.CreatePreparedTask(ctx, createPreparedTask(target, content, source))
 		if err == nil {
@@ -329,6 +348,10 @@ func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask,
 		if isAppConflict(err) {
 			log.Printf("prepared task duplicate skipped: target=%d/%s attempt=%d/%d",
 				target.OgeNumber, target.SubtypeCode, attempt, maxAttempts)
+			feedback = duplicatePreparedFeedback
+			if source == "fallback" {
+				break
+			}
 			continue
 		}
 		return PreparedTask{}, err
@@ -336,7 +359,29 @@ func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask,
 	return PreparedTask{}, app.TaskUnavailable("Не удалось подготовить уникальную задачу")
 }
 
-func (s *Service) generateContent(ctx context.Context, target Target) (GeneratedContent, string, error) {
+func (s *Service) reviewPreparedTask(ctx context.Context, target Target, content GeneratedContent, source string) error {
+	if s.ai == nil || !s.ai.IsConfigured() || source == "fallback" {
+		return nil
+	}
+	review, err := s.ai.ReviewGeneratedTask(ctx, target, content)
+	if err != nil {
+		return err
+	}
+	review.Reason = strings.TrimSpace(review.Reason)
+	review.CorrectAnswer = strings.TrimSpace(review.CorrectAnswer)
+	if !review.IsValid {
+		if review.Reason == "" {
+			return errors.New("AI reviewer rejected generated task")
+		}
+		return fmt.Errorf("AI reviewer rejected generated task: %s", review.Reason)
+	}
+	if review.CorrectAnswer != "" && strings.TrimSpace(content.CorrectAnswer) != review.CorrectAnswer {
+		return fmt.Errorf("AI reviewer expected correct_answer %q, got %q", review.CorrectAnswer, content.CorrectAnswer)
+	}
+	return nil
+}
+
+func (s *Service) generateContent(ctx context.Context, target Target, feedback string) (GeneratedContent, string, error) {
 	if s.ai == nil || !s.ai.IsConfigured() {
 		if RequiresVisualData(target) {
 			err := errors.New("AI client is not configured")
@@ -348,12 +393,14 @@ func (s *Service) generateContent(ctx context.Context, target Target) (Generated
 
 	var lastErr error
 	const maxAttempts = 3
+	attemptFeedback := strings.TrimSpace(feedback)
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		started := time.Now()
-		content, err := s.ai.GenerateTask(ctx, target)
+		content, err := s.ai.GenerateTask(ctx, target, attemptFeedback)
 		duration := time.Since(started)
 		if err != nil {
 			lastErr = err
+			attemptFeedback = mergeGenerationFeedback(feedback, err)
 			log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=error error=%v",
 				target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds(), err)
 			continue
@@ -361,6 +408,7 @@ func (s *Service) generateContent(ctx context.Context, target Target) (Generated
 
 		if err := validateGeneratedContent(target, &content); err != nil {
 			lastErr = err
+			attemptFeedback = mergeGenerationFeedback(feedback, err)
 			log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=error error=%v",
 				target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds(), err)
 			continue
@@ -380,6 +428,28 @@ func (s *Service) generateContent(ctx context.Context, target Target) (Generated
 		lastErr = errors.New("ai returned no generated content")
 	}
 	return GeneratedContent{}, "", app.AIUnavailable(lastErr)
+}
+
+const (
+	duplicateGeneratedFeedback = "The previous generated task was rejected as a duplicate for this user. Generate a clearly different task: change the wording, scenario, all key numeric values, final answer, and visual_data if present."
+	duplicatePreparedFeedback  = "The previous prepared task was rejected as a duplicate already stored for this target. Generate a clearly different task: change the wording, scenario, all key numeric values, final answer, and visual_data if present."
+	workerReviewFeedback       = "The worker reviewer rejected the previous task. Fix the mathematical correctness, make correct_answer match the solved result exactly, and keep the task in the requested OGE subtype."
+)
+
+func mergeGenerationFeedback(base string, err error) string {
+	base = strings.TrimSpace(base)
+	errText := ""
+	if err != nil {
+		errText = strings.TrimSpace(err.Error())
+	}
+	switch {
+	case base != "" && errText != "":
+		return base + "; " + errText
+	case base != "":
+		return base
+	default:
+		return errText
+	}
 }
 
 func validateGeneratedContent(target Target, content *GeneratedContent) error {

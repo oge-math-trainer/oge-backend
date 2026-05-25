@@ -3,6 +3,7 @@ package tasks
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
@@ -43,6 +44,9 @@ func TestGenerateWithoutPreparedTaskGeneratesOnDemand(t *testing.T) {
 	}
 	if repo.createPreparedCalls != 1 {
 		t.Fatalf("expected one prepared task cache write, got %d", repo.createPreparedCalls)
+	}
+	if ai.reviewCalls != 0 {
+		t.Fatalf("expected on-demand generation to skip worker review, got %d review calls", ai.reviewCalls)
 	}
 }
 
@@ -357,6 +361,63 @@ func TestPrepareTaskRetriesDuplicatePreparedContent(t *testing.T) {
 	}
 }
 
+func TestPrepareTaskRunsWorkerReviewBeforeStoring(t *testing.T) {
+	repo := &fakeRepo{}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+
+	_, err := service.PrepareTask(context.Background(), Target{TaskTypeID: ptrInt64(7), OgeNumber: 9, SubtypeCode: "equations_linear"})
+	if err != nil {
+		t.Fatalf("PrepareTask returned error: %v", err)
+	}
+	if ai.reviewCalls != 1 {
+		t.Fatalf("expected one worker review call, got %d", ai.reviewCalls)
+	}
+}
+
+func TestPrepareTaskRetriesWhenWorkerReviewRejects(t *testing.T) {
+	repo := &fakeRepo{}
+	ai := &fakeAI{
+		configured: true,
+		reviews: []GenerationReview{
+			{IsValid: false, Reason: "ответ не совпадает с решением", CorrectAnswer: "5"},
+			{IsValid: true, CorrectAnswer: "1"},
+		},
+	}
+	service := NewService(repo, ai)
+
+	_, err := service.PrepareTask(context.Background(), Target{TaskTypeID: ptrInt64(7), OgeNumber: 9, SubtypeCode: "equations_linear"})
+	if err != nil {
+		t.Fatalf("PrepareTask returned error: %v", err)
+	}
+	if ai.generateCalls != 2 {
+		t.Fatalf("expected generation retry after review rejection, got %d calls", ai.generateCalls)
+	}
+	if ai.reviewCalls != 2 {
+		t.Fatalf("expected two worker review calls, got %d", ai.reviewCalls)
+	}
+	if len(ai.feedbacks) < 2 || !strings.Contains(ai.feedbacks[1], "reviewer rejected") {
+		t.Fatalf("expected reviewer feedback on retry, got %#v", ai.feedbacks)
+	}
+}
+
+func TestPrepareTaskPassesDuplicateFeedbackToNextGeneration(t *testing.T) {
+	repo := &fakeRepo{createPreparedErrs: []error{app.Conflict("duplicate prepared task"), nil}}
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
+
+	_, err := service.PrepareTask(context.Background(), Target{TaskTypeID: ptrInt64(7), OgeNumber: 9, SubtypeCode: "equations_linear"})
+	if err != nil {
+		t.Fatalf("PrepareTask returned error: %v", err)
+	}
+	if len(ai.feedbacks) < 2 {
+		t.Fatalf("expected feedback on retry, got %#v", ai.feedbacks)
+	}
+	if !strings.Contains(ai.feedbacks[1], "duplicate") {
+		t.Fatalf("expected duplicate feedback on retry, got %q", ai.feedbacks[1])
+	}
+}
+
 func TestCheckWithoutAIKeyReturnsAIUnavailable(t *testing.T) {
 	repo := &fakeRepo{
 		task: Task{ID: 1, UserID: 1, Mode: ModeWeak, OgeNumber: 9, SubtypeCode: "linear_equation", Question: "x + 2 = 5", CorrectAnswer: "3"},
@@ -520,16 +581,21 @@ func (r *fakeRepo) UpdateProgress(context.Context, int64, Task, bool) error {
 type fakeAI struct {
 	configured    bool
 	generated     []GeneratedContent
+	reviews       []GenerationReview
 	generateErr   error
+	reviewErr     error
 	generateCalls int
+	reviewCalls   int
+	feedbacks     []string
 }
 
 func (f fakeAI) IsConfigured() bool {
 	return f.configured
 }
 
-func (f *fakeAI) GenerateTask(context.Context, Target) (GeneratedContent, error) {
+func (f *fakeAI) GenerateTask(_ context.Context, _ Target, feedback string) (GeneratedContent, error) {
 	f.generateCalls++
+	f.feedbacks = append(f.feedbacks, feedback)
 	if f.generateErr != nil {
 		return GeneratedContent{}, f.generateErr
 	}
@@ -537,6 +603,17 @@ func (f *fakeAI) GenerateTask(context.Context, Target) (GeneratedContent, error)
 		return f.generated[f.generateCalls-1], nil
 	}
 	return validGeneratedContent(nil), nil
+}
+
+func (f *fakeAI) ReviewGeneratedTask(context.Context, Target, GeneratedContent) (GenerationReview, error) {
+	f.reviewCalls++
+	if f.reviewErr != nil {
+		return GenerationReview{}, f.reviewErr
+	}
+	if len(f.reviews) >= f.reviewCalls {
+		return f.reviews[f.reviewCalls-1], nil
+	}
+	return GenerationReview{IsValid: true, CorrectAnswer: "1"}, nil
 }
 
 func (f fakeAI) CheckAnswer(context.Context, Task, string) (CheckResult, error) {
