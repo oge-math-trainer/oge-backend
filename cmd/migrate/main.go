@@ -41,7 +41,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("migrations complete: applied=%d skipped=%d", len(result.Applied), len(result.Skipped))
+	log.Printf(
+		"migrations complete: baselined=%d applied=%d skipped=%d",
+		len(result.Baselined),
+		len(result.Applied),
+		len(result.Skipped),
+	)
+	for _, name := range result.Baselined {
+		log.Printf("migration baselined: %s", name)
+	}
 	for _, name := range result.Applied {
 		log.Printf("migration applied: %s", name)
 	}

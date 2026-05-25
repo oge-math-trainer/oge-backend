@@ -5,8 +5,7 @@ services:
     plan: free
     region: frankfurt
     buildCommand: go build -tags netgo -ldflags '-s -w' -o app ./cmd/server && go build -tags netgo -ldflags '-s -w' -o migrate ./cmd/migrate
-    preDeployCommand: ./migrate
-    startCommand: ./app
+    startCommand: ./migrate && ./app
     healthCheckPath: /health
     autoDeployTrigger: commit
     envVars:
