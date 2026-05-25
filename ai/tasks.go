@@ -371,7 +371,7 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 			spec.TemplateMarker = "circle_tangents tangent_from_external_point"
 			spec.SubtypeInstruction = "Обязательно формат касательных: из внешней точки A к окружности проведены касательные AB и AC или одна касательная AT; радиус к точке касания перпендикулярен касательной; найти радиус, расстояние до центра или длину касательной."
 		case "circle_inscribed":
-			spec.SubtypeInstruction = "Работай с вписанной или описанной окружностью."
+			spec.SubtypeInstruction = "Работай с вписанной или описанной окружностью. Подбирай числа так чтобы ответ был целым числом или простой десятичной дробью. Не используй числа которые дают иррациональный ответ."
 		case "circle_sector":
 			spec.SubtypeInstruction = "Работай с сектором, сегментом, дугой или центральным углом."
 		}
@@ -536,9 +536,10 @@ func visualPromptRule(target tasks.Target) string {
 	switch tasks.VisualKindForTarget(target) {
 	case tasks.VisualKindGraph:
 		return `Required visual_data:
-Add "visual_data" using this schema:
-{"type":"graph","x_axis":{"min":-10,"max":10},"y_axis":{"min":-10,"max":10},"plots":[{"id":"A","label":"Graph A","points":[{"x":-2,"y":4},{"x":0,"y":0},{"x":2,"y":4}]},{"id":"B","label":"Graph B","points":[{"x":-2,"y":-4},{"x":0,"y":0},{"x":2,"y":-4}]},{"id":"C","label":"Graph C","points":[{"x":-2,"y":0},{"x":0,"y":4},{"x":2,"y":0}]}]}
-For OGE 11 matching tasks, create exactly 3 separate graph pictures: A, B, C. Put each picture in visual_data.plots. Do not combine several curves into one plot unless the task explicitly asks for intersections or a system. Each plot must have at least 3 coordinate points.`
+Add "visual_data" using this schema. For smooth curves provide at least 11 evenly spaced points across the x range.
+Example for parabola y=x^2 with 11 points:
+{"type":"graph","x_axis":{"min":-5,"max":5},"y_axis":{"min":-2,"max":10},"plots":[{"id":"A","label":"Graph A","points":[{"x":-5,"y":25},{"x":-4,"y":16},{"x":-3,"y":9},{"x":-2,"y":4},{"x":-1,"y":1},{"x":0,"y":0},{"x":1,"y":1},{"x":2,"y":4},{"x":3,"y":9},{"x":4,"y":16},{"x":5,"y":25}]}]}
+For OGE 11 matching tasks create exactly 3 separate plots: A, B, C. Each plot minimum 11 points. Do not combine curves.`
 	case tasks.VisualKindNumberLine:
 		return `Required visual_data:
 Add "visual_data" using this schema:
