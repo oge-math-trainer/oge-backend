@@ -172,6 +172,7 @@ type Repository interface {
 
 type AIClient interface {
 	IsConfigured() bool
+	ModelName() string
 	GenerateTask(ctx context.Context, target Target, feedback string) (GeneratedContent, error)
 	ReviewGeneratedTask(ctx context.Context, target Target, content GeneratedContent) (GenerationReview, error)
 	CheckAnswer(ctx context.Context, task Task, studentAnswer string) (CheckResult, error)
@@ -426,9 +427,10 @@ func (s *Service) generateContent(ctx context.Context, target Target, feedback s
 			continue
 		}
 
-		log.Printf("ai generation result: oge_number=%d subtype_code=%s attempt=%d duration_ms=%d validation=success",
-			target.OgeNumber, target.SubtypeCode, attempt, duration.Milliseconds())
-		return content, "gpt-4o-mini", nil
+		source := s.aiSource()
+		log.Printf("ai generation result: oge_number=%d subtype_code=%s source=%s attempt=%d duration_ms=%d validation=success",
+			target.OgeNumber, target.SubtypeCode, source, attempt, duration.Milliseconds())
+		return content, source, nil
 	}
 
 	if allowFallback && RequiresVisualData(target) {
@@ -440,6 +442,17 @@ func (s *Service) generateContent(ctx context.Context, target Target, feedback s
 		lastErr = errors.New("ai returned no generated content")
 	}
 	return GeneratedContent{}, "", app.AIUnavailable(lastErr)
+}
+
+func (s *Service) aiSource() string {
+	if s.ai == nil {
+		return "ai"
+	}
+	source := strings.TrimSpace(s.ai.ModelName())
+	if source == "" {
+		return "ai"
+	}
+	return source
 }
 
 const (

@@ -49,7 +49,7 @@ func main() {
 
 	log.Printf("DEBUG: AITunnelAPIKey length: %d", len(cfg.AITunnelAPIKey))
 	if aiClient.IsConfigured() {
-		log.Print("AI CLIENT: configured (key is present)")
+		log.Printf("AI CLIENT: configured model=%s", aiClient.ModelName())
 	} else {
 		log.Print("AI CLIENT: not configured (key is missing or empty)")
 	}

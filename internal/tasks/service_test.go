@@ -9,6 +9,8 @@ import (
 	"github.com/oge-math-trainer/oge-backend.git/internal/app"
 )
 
+const testAIModel = "qwen3-235b-a22b-2507"
+
 func TestGenerateWithoutPreparedTaskGeneratesOnDemand(t *testing.T) {
 	repo := &fakeRepo{}
 	ai := &fakeAI{configured: true}
@@ -27,8 +29,8 @@ func TestGenerateWithoutPreparedTaskGeneratesOnDemand(t *testing.T) {
 	if task.Question != "generated" {
 		t.Fatalf("expected on-demand generated task, got %q", task.Question)
 	}
-	if task.Source != "gpt-4o-mini" {
-		t.Fatalf("expected gpt-4o-mini source, got %q", task.Source)
+	if task.Source != testAIModel {
+		t.Fatalf("expected %s source, got %q", testAIModel, task.Source)
 	}
 	if ai.generateCalls != 1 {
 		t.Fatalf("expected one foreground AI call, got %d", ai.generateCalls)
@@ -161,8 +163,8 @@ func TestPrepareTaskRetriesAndUsesSecondValidVisualData(t *testing.T) {
 	if ai.generateCalls != 2 {
 		t.Fatalf("expected 2 AI calls, got %d", ai.generateCalls)
 	}
-	if task.Source != "gpt-4o-mini" {
-		t.Fatalf("expected gpt-4o-mini source, got %q", task.Source)
+	if task.Source != testAIModel {
+		t.Fatalf("expected %s source, got %q", testAIModel, task.Source)
 	}
 	if repo.prepared.VisualData["type"] != string(VisualKindNumberLine) {
 		t.Fatalf("expected number_line visual_data, got %v", repo.prepared.VisualData["type"])
@@ -213,8 +215,8 @@ func TestGenerateIgnoresPreparedTaskInDirectAIMode(t *testing.T) {
 	if task.Question != "generated" {
 		t.Fatalf("expected direct AI generated task, got %q", task.Question)
 	}
-	if task.Source != "gpt-4o-mini" {
-		t.Fatalf("expected gpt-4o-mini source, got %q", task.Source)
+	if task.Source != testAIModel {
+		t.Fatalf("expected %s source, got %q", testAIModel, task.Source)
 	}
 	if task.Mode != ModeCustom {
 		t.Fatalf("expected mode %q, got %q", ModeCustom, task.Mode)
@@ -348,8 +350,8 @@ func TestPrepareTaskStoresValidatedPreparedTask(t *testing.T) {
 	if prepared.ID == 0 {
 		t.Fatal("expected saved prepared task id")
 	}
-	if prepared.Source != "gpt-4o-mini" {
-		t.Fatalf("expected source gpt-4o-mini, got %q", prepared.Source)
+	if prepared.Source != testAIModel {
+		t.Fatalf("expected source %s, got %q", testAIModel, prepared.Source)
 	}
 	if repo.prepared == nil {
 		t.Fatal("expected prepared task to be stored in repo")
@@ -594,6 +596,7 @@ func (r *fakeRepo) UpdateProgress(context.Context, int64, Task, bool) error {
 
 type fakeAI struct {
 	configured    bool
+	model         string
 	generated     []GeneratedContent
 	reviews       []GenerationReview
 	generateErr   error
@@ -605,6 +608,13 @@ type fakeAI struct {
 
 func (f fakeAI) IsConfigured() bool {
 	return f.configured
+}
+
+func (f fakeAI) ModelName() string {
+	if strings.TrimSpace(f.model) != "" {
+		return strings.TrimSpace(f.model)
+	}
+	return testAIModel
 }
 
 func (f *fakeAI) GenerateTask(_ context.Context, _ Target, feedback string) (GeneratedContent, error) {
@@ -670,6 +680,6 @@ func validPreparedTask(id int64, question string) PreparedTask {
 		SelfCheck:       "check",
 		IsValid:         true,
 		ValidationNotes: "ok",
-		Source:          "gpt-4o-mini",
+		Source:          testAIModel,
 	}
 }

@@ -43,6 +43,7 @@ func main() {
 	if !aiClient.IsConfigured() {
 		log.Fatal("AI client is not configured; set AITUNNEL_API_KEY and AITUNNEL_MODEL")
 	}
+	log.Printf("AI CLIENT: configured model=%s", aiClient.ModelName())
 
 	taskService := tasks.NewService(store, aiClient)
 	if tasks.DirectAIGeneration {

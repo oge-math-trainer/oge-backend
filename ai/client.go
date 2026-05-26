@@ -89,6 +89,13 @@ func NewConfiguredClient(baseURL, apiKey, model string) *Client {
 	}
 }
 
+func (c *Client) ModelName() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.model)
+}
+
 // Chat отправляет запрос к AI и возвращает текст ответа
 func (c *Client) Chat(systemPrompt string, userMessage string, maxTokens int, temperature float64) (string, error) {
 	// Собираем тело запроса
