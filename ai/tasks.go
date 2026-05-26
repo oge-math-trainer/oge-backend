@@ -364,9 +364,9 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
         	spec.SubtypeInstruction = "Дай линейное уравнение в практическом контексте. Пример: 'Фирма 'Родник': C = 6000 + 4100·n, где n — число колец. Найдите стоимость колодца из 5 колец.' correct_answer должен быть числом."
     	}
 	case 13:
-		spec.Format = "Формат СДАМ ГИА №13: решить неравенство или систему неравенств и выбрать подходящий вариант ответа."
-		spec.SubtypeInstruction = "Дай 4 варианта ответа с промежутками. correct_answer - номер правильного варианта одной цифрой."
-		spec.Forbidden = "Не используй уравнения без знаков неравенства."
+    	spec.Format = "Формат СДАМ ГИА №13: решить неравенство или систему неравенств и выбрать подходящий вариант ответа."
+    	spec.SubtypeInstruction = "Дай ровно 4 варианта ответа с числовыми промежутками. correct_answer - номер правильного варианта одной цифрой (1, 2, 3 или 4)."
+    	spec.Forbidden = "НЕ генерируй visual_data с числовой прямой. НЕ используй LaTeX \\begin{cases}. Для систем пиши обычный текстовый формат с фигурной скобкой слева:\n{\n  первое неравенство,\n  второе неравенство\n}"
 	case 14:
 		spec.Format = "Формат СДАМ ГИА №14: арифметическая или геометрическая прогрессия, часто практическая текстовая задача."
 		if subtype == "progression_geom" {
@@ -389,42 +389,62 @@ func sdamgiaSpec(target tasks.Target) sdamgiaTaskSpec {
 			spec.SubtypeInstruction = "Работай с медианой, биссектрисой, высотой или средней линией треугольника."
 		}
 	case 16:
-		spec.Format = "Формат СДАМ ГИА №16: окружность и её элементы, обычно с чертежом."
-		spec.Forbidden = "Не генерируй задачу только про треугольник, трапецию или прямоугольник."
-		switch subtype {
-		case "circle_elements":
-			spec.SubtypeInstruction = "Работай с радиусом, диаметром, хордой, расстоянием от центра до хорды, длиной окружности или площадью круга."
-		case "circle_angles":
-			spec.SubtypeInstruction = "Работай с вписанным или центральным углом и дугой."
-		case "circle_tangents":
-			spec.TemplateMarker = "circle_tangents tangent_from_external_point"
-			spec.SubtypeInstruction = "Обязательно формат касательных: из внешней точки A к окружности проведены касательные AB и AC или одна касательная AT; радиус к точке касания перпендикулярен касательной; найти радиус, расстояние до центра или длину касательной."
-		case "circle_inscribed":
-			spec.SubtypeInstruction = "Работай с вписанной или описанной окружностью. Подбирай числа так чтобы ответ был целым числом или простой десятичной дробью. Не используй числа которые дают иррациональный ответ."
-		case "circle_sector":
-			spec.SubtypeInstruction = "Работай с сектором, сегментом, дугой или центральным углом."
-		}
+    	spec.Format = "Формат СДАМ ГИА №16: окружность и её элементы, обязательно с чертежом."
+    	spec.Forbidden = "Не генерируй задачу только про треугольник, трапецию или прямоугольник без окружности."
+    
+    	switch subtype {
+    	case "circle_elements":
+        	spec.SubtypeInstruction = "Работай с радиусом, диаметром, хордой, расстоянием от центра до хорды, длиной окружности или площадью круга."
+    	case "circle_angles":
+    	    spec.SubtypeInstruction = "Строго задача про ВПИСАННЫЕ и ЦЕНТРАЛЬНЫЕ углы. В условии и visual_data должна быть ОКРУЖНОСТЬ с центром O, хорды/дуги/углы. НЕ рисуй треугольники без окружности."
+    	case "circle_tangents":
+    	    spec.TemplateMarker = "circle_tangents tangent_from_external_point"
+    	    spec.SubtypeInstruction = "Обязательно формат касательных: из внешней точки A к окружности проведены касательные AB и AC или одна касательная AT; радиус к точке касания перпендикулярен касательной; найти радиус, расстояние до центра или длину касательной."
+    	case "circle_inscribed":
+    	    spec.SubtypeInstruction = "ОКРУЖНОСТЬ ВПИСАНА в многоугольник (касается всех сторон). Найди радиус, сторону или периметр. Подбирай числа так, чтобы ответ был целым или простой десятичной дробью."
+    	case "circle_circumscribed":
+    	    spec.SubtypeInstruction = "МНОГОУГОЛЬНИК ВПИСАН в окружность (все вершины лежат на окружности). Найди радиус, сторону или угол. НЕ путай с вписанной окружностью."
+    	case "circle_sector":
+    	    spec.SubtypeInstruction = "Работай с сектором, сегментом, дугой или центральным углом."
+    	}
 	case 17:
-		spec.Format = "Формат СДАМ ГИА №17: свойства, диагонали или площадь четырёхугольника, обычно с чертежом."
-		spec.Forbidden = "Не генерируй задачу про одну окружность как №16 и клетчатую бумагу как №18."
-		switch subtype {
-		case "quad_properties":
-			spec.SubtypeInstruction = "Работай с параллелограммом, ромбом, прямоугольником или квадратом."
-		case "quad_trapezoid":
-			spec.SubtypeInstruction = "Работай с трапецией, основаниями, средней линией или высотой."
-		case "quad_area":
-			spec.SubtypeInstruction = "Работай с площадями четырёхугольников."
-		case "quad_diagonals":
-			spec.SubtypeInstruction = "Работай с диагоналями прямоугольника, ромба, квадрата или параллелограмма."
-		}
+    	spec.Format = "Формат СДАМ ГИА №17: свойства, диагонали или площадь четырёхугольника, обычно с чертежом."
+    	spec.Forbidden = "Не генерируй задачу про одну окружность как №16 и клетчатую бумагу как №18."
+    
+    	switch subtype {
+    	case "quad_properties":
+    	    spec.SubtypeInstruction = "Работай с параллелограммом, ромбом, прямоугольником или квадратом."
+    	case "quad_trapezoid":
+    	    spec.SubtypeInstruction = "Работай с трапецией, основаниями, средней линией или высотой."
+    	case "quad_area":
+    	    spec.SubtypeInstruction = "Работай с площадями четырёхугольников."
+    	case "quad_diagonals":
+    	    spec.SubtypeInstruction = "Работай с диагоналями прямоугольника, ромба, квадрата или параллелограмма."
+    	case "quad_rectangle":
+    	    spec.SubtypeInstruction = "Строго задача про ПРЯМОУГОЛЬНИК. Используй свойства: диагонали равны, все углы 90°, площадь = a·b. НЕ генерируй треугольники."
+    	case "quad_rhombus":
+    	    spec.SubtypeInstruction = "Строго задача про РОМБ. Все стороны равны, диагонали перпендикулярны и делят углы пополам. visual_data должен отражать равные стороны и перпендикулярные диагонали."
+    	}
 	case 18:
-		spec.Format = "Формат СДАМ ГИА №18: геометрия на клетчатой бумаге."
-		spec.SubtypeInstruction = "Используй координаты точек на решётке; нужно найти расстояние, площадь, длину или среднюю линию."
-		spec.Forbidden = "Не используй обычный чертёж без клетчатой решётки."
+    	spec.Format = "Формат СДАМ ГИА №18: геометрия на клетчатой бумаге."
+    	spec.Forbidden = "Не используй обычный чертёж без клетчатой решётки."
+    
+    	switch subtype {
+    	case "geo_distance":
+    	    spec.SubtypeInstruction = "На клетчатой бумаге отмечены две точки. Найди длину отрезка между ними."
+    	case "geo_midline":
+    	    spec.SubtypeInstruction = "На клетчатой бумаге изображён ТРЕУГОЛЬНИК или ТРАПЕЦИЯ. Нужно найти длину СРЕДНЕЙ ЛИНИИ. НЕ расстояние между двумя точками!"
+    	case "geo_pythagor":
+    	    spec.SubtypeInstruction = "На клетчатой бумаге дан прямоугольный треугольник или фигура, где нужно применить теорему Пифагора для нахождения длины отрезка."
+    	case "geo_area":
+    	    spec.SubtypeInstruction = "На клетчатой бумаге изображена фигура. Найди её площадь (например, методом Пика или разбиением)."
+    	case "geo_side_length":
+    	    spec.SubtypeInstruction = "На клетчатой бумаге даны координаты вершин. Найди длину стороны многоугольника."
+    	}
 	case 19:
-		spec.Format = "Формат СДАМ ГИА №19: выбрать номера верных геометрических утверждений."
-		spec.SubtypeInstruction = "Дай ровно 3 утверждения. correct_answer - только цифры верных утверждений в возрастающем порядке, например 13. Не используй формат 1-A."
-		spec.Forbidden = "Не проси вычислить длину, площадь или угол; это проверка истинности утверждений."
+    	spec.Format = "Формат СДАМ ГИА №19: выбрать номера верных геометрических утверждений."
+    	spec.SubtypeInstruction = "НЕ начинай условие с фраз 'На рисунке изображены...'. Дай ровно 3 утверждения. correct_answer - только цифры верных утверждений в возрастающем порядке, например '13'. Для окружности используй стандартные теоремы ОГЭ (вписанный угол равен половине центрального, касательная перпендикулярна радиусу, хорды и их свойства). НЕ усложняй конструкциями с пересекающимися хордами в точке О."
+    	spec.Forbidden = "Не проси вычислить длину, площадь или угол; это проверка истинности утверждений."
 	}
 
 	return spec
@@ -575,10 +595,10 @@ Add "visual_data" using this schema:
 {"type":"number_line","axis":{"min":-5,"max":5},"interval":{"start":-1,"end":3,"start_closed":true,"end_closed":false},"points":[{"value":-1,"closed":true,"label":"-1"},{"value":3,"closed":false,"label":"3"}]}
 The interval and points must match the condition and the correct option.`
 	case tasks.VisualKindGeometry:
-		return `Required visual_data:
+    	return `Required visual_data:
 Add "visual_data" using this schema:
 {"type":"geometry","shape":"triangle","vertices":[{"label":"A","x":0,"y":0},{"label":"B","x":6,"y":0},{"label":"C","x":0,"y":8}],"labels":{"A":"A","B":"B","C":"C"},"segments":[{"from":"A","to":"B","label":"6"},{"from":"A","to":"C","label":"8"},{"from":"B","to":"C"}]}
-visual_data.type must always be "geometry". For circle tasks put the circle kind only in shape: "circle_tangent", "circle_angles", "circle_chord" or "circle_sector"; you may add circles:[{"center":"O","through":"B"}].`
+IMPORTANT: For circle tasks (subtype contains 'circle'), set shape to "circle", add "center":{"label":"O","x":0,"y":0}, "radius":5, and relevant points/chords/angles. For quadrilaterals, set shape to "quadrilateral" with 4 vertices. visual_data.type must always be "geometry".`
 	case tasks.VisualKindGrid:
 		return `Required visual_data:
 Add "visual_data" using this schema:
