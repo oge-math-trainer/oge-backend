@@ -252,34 +252,10 @@ func (s *Store) GetWeakTarget(ctx context.Context, userID int64) (tasks.Target, 
 
 func (s *Store) GetRandomTaskType(ctx context.Context) (tasks.Target, error) {
 	row := s.pool.QueryRow(ctx, `
-		WITH ready AS (
-			SELECT tt.id, tt.oge_number, tt.subtype_code
-			FROM task_types tt
-			WHERE tt.oge_number BETWEEN 6 AND 19
-				AND EXISTS (
-					SELECT 1
-					FROM prepared_tasks pt
-					WHERE pt.used = false
-						AND pt.shown_count < 20
-						AND pt.oge_number = tt.oge_number
-						AND pt.subtype_code = tt.subtype_code
-				)
-			ORDER BY random()
-			LIMIT 1
-		),
-		any_target AS (
-			SELECT tt.id, tt.oge_number, tt.subtype_code
-			FROM task_types tt
-			WHERE tt.oge_number BETWEEN 6 AND 19
-			ORDER BY random()
-			LIMIT 1
-		)
 		SELECT id, oge_number, subtype_code
-		FROM ready
-		UNION ALL
-		SELECT id, oge_number, subtype_code
-		FROM any_target
-		WHERE NOT EXISTS (SELECT 1 FROM ready)
+		FROM task_types
+		WHERE oge_number BETWEEN 6 AND 19
+		ORDER BY random()
 		LIMIT 1
 	`)
 	return scanTarget(row, "Нет готовых заданий для режима all")

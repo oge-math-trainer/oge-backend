@@ -16,6 +16,10 @@ const (
 	ModeAll        = "all"
 	ModeCustom     = "custom"
 	ModeDiagnostic = "diagnostic"
+
+	// Temporary mode: generate user-facing tasks directly with AI and do not use
+	// the prepared_tasks bank.
+	DirectAIGeneration = true
 )
 
 type Target struct {
@@ -190,6 +194,12 @@ func (s *Service) Generate(ctx context.Context, req GenerateRequest) (Task, erro
 		return Task{}, err
 	}
 
+	if DirectAIGeneration {
+		log.Printf("task generate direct ai: user_id=%d mode=%s target=%d/%s",
+			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode)
+		return s.generateOnDemand(ctx, req, target)
+	}
+
 	const maxPreparedAttempts = 5
 	for attempt := 1; attempt <= maxPreparedAttempts; attempt++ {
 		preparedTask, err := s.repo.GetPreparedTask(ctx, req.UserID, target)
@@ -249,7 +259,7 @@ func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, tar
 	const maxAttempts = 3
 	feedback := ""
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		content, source, err := s.generateContent(ctx, target, feedback)
+		content, source, err := s.generateContent(ctx, target, feedback, !DirectAIGeneration)
 		if err != nil {
 			return Task{}, err
 		}
@@ -257,7 +267,9 @@ func (s *Service) generateOnDemand(ctx context.Context, req GenerateRequest, tar
 			req.UserID, req.Mode, target.OgeNumber, target.SubtypeCode, source, attempt, maxAttempts)
 		task, err := s.repo.CreateGeneratedTask(ctx, createGeneratedTask(req.UserID, storedMode(req), target, content, source))
 		if err == nil {
-			s.cacheOnDemandTask(ctx, target, content, source)
+			if !DirectAIGeneration {
+				s.cacheOnDemandTask(ctx, target, content, source)
+			}
 			return task, nil
 		}
 		if isAppConflict(err) {
@@ -331,7 +343,7 @@ func (s *Service) PrepareTask(ctx context.Context, target Target) (PreparedTask,
 	const maxAttempts = 5
 	feedback := ""
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		content, source, err := s.generateContent(ctx, target, feedback)
+		content, source, err := s.generateContent(ctx, target, feedback, true)
 		if err != nil {
 			return PreparedTask{}, err
 		}
@@ -381,9 +393,9 @@ func (s *Service) reviewPreparedTask(ctx context.Context, target Target, content
 	return nil
 }
 
-func (s *Service) generateContent(ctx context.Context, target Target, feedback string) (GeneratedContent, string, error) {
+func (s *Service) generateContent(ctx context.Context, target Target, feedback string, allowFallback bool) (GeneratedContent, string, error) {
 	if s.ai == nil || !s.ai.IsConfigured() {
-		if RequiresVisualData(target) {
+		if allowFallback && RequiresVisualData(target) {
 			err := errors.New("AI client is not configured")
 			log.Printf("ai generation fallback: oge_number=%d subtype_code=%s reason=%v", target.OgeNumber, target.SubtypeCode, err)
 			return FallbackGeneratedContent(target, err), "fallback", nil
@@ -419,7 +431,7 @@ func (s *Service) generateContent(ctx context.Context, target Target, feedback s
 		return content, "gpt-4o-mini", nil
 	}
 
-	if RequiresVisualData(target) {
+	if allowFallback && RequiresVisualData(target) {
 		log.Printf("ai generation fallback: oge_number=%d subtype_code=%s reason=%v", target.OgeNumber, target.SubtypeCode, lastErr)
 		return FallbackGeneratedContent(target, lastErr), "fallback", nil
 	}

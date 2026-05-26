@@ -45,7 +45,7 @@ func TestBuildGeneratePromptUsesCatalogAlias(t *testing.T) {
 	if !strings.Contains(prompt, "Действия с обыкновенными дробями") {
 		t.Fatalf("expected aliased catalog title in prompt, got:\n%s", prompt)
 	}
-	if !strings.Contains(prompt, "Нахождение дроби от числа") {
+	if !strings.Contains(prompt, "Сложение, вычитание") {
 		t.Fatalf("expected aliased catalog description in prompt, got:\n%s", prompt)
 	}
 }

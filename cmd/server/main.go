@@ -71,7 +71,9 @@ func main() {
 	diagnosticService := diagnostic.NewService(store, taskService, aiClient)
 	progressService := progress.NewService(store)
 
-	if aiClient.IsConfigured() && cfg.PreparedTasksMin > 0 {
+	if tasks.DirectAIGeneration {
+		log.Print("embedded prepared task worker disabled: direct AI generation mode")
+	} else if aiClient.IsConfigured() && cfg.PreparedTasksMin > 0 {
 		worker := tasks.NewWorker(taskService, store, cfg.PreparedTasksMin, cfg.PreparedTasksInterval)
 		go func() {
 			log.Printf("embedded prepared task worker starting: min_per_target=%d interval=%s", cfg.PreparedTasksMin, cfg.PreparedTasksInterval)

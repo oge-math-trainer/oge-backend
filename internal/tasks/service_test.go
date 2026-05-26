@@ -36,21 +36,21 @@ func TestGenerateWithoutPreparedTaskGeneratesOnDemand(t *testing.T) {
 	if repo.created.UserID != 1 || repo.created.OgeNumber != 9 || repo.created.SubtypeCode != "linear_equation" {
 		t.Fatalf("unexpected created task: %+v", repo.created)
 	}
-	if repo.prepared == nil {
-		t.Fatal("expected on-demand task to be cached as prepared task")
+	if repo.prepared != nil {
+		t.Fatalf("expected no prepared task cache write, got %+v", repo.prepared)
 	}
-	if repo.prepared.Question != "generated" || repo.prepared.Source != "gpt-4o-mini" {
-		t.Fatalf("unexpected cached prepared task: %+v", repo.prepared)
+	if repo.createPreparedCalls != 0 {
+		t.Fatalf("expected no prepared task cache writes, got %d", repo.createPreparedCalls)
 	}
-	if repo.createPreparedCalls != 1 {
-		t.Fatalf("expected one prepared task cache write, got %d", repo.createPreparedCalls)
+	if repo.getPreparedCalls != 0 {
+		t.Fatalf("expected no prepared task lookup, got %d", repo.getPreparedCalls)
 	}
 	if ai.reviewCalls != 0 {
 		t.Fatalf("expected on-demand generation to skip worker review, got %d review calls", ai.reviewCalls)
 	}
 }
 
-func TestGenerateOnDemandIgnoresDuplicatePreparedCache(t *testing.T) {
+func TestGenerateOnDemandDoesNotWritePreparedCache(t *testing.T) {
 	repo := &fakeRepo{createPreparedErrs: []error{app.Conflict("duplicate prepared task")}}
 	ai := &fakeAI{configured: true}
 	service := NewService(repo, ai)
@@ -68,8 +68,8 @@ func TestGenerateOnDemandIgnoresDuplicatePreparedCache(t *testing.T) {
 	if task.Question != "generated" {
 		t.Fatalf("expected on-demand generated task, got %q", task.Question)
 	}
-	if repo.createPreparedCalls != 1 {
-		t.Fatalf("expected one prepared task cache write, got %d", repo.createPreparedCalls)
+	if repo.createPreparedCalls != 0 {
+		t.Fatalf("expected no prepared task cache writes, got %d", repo.createPreparedCalls)
 	}
 }
 
@@ -182,7 +182,7 @@ func TestGenerateCustomRequiresTargetFields(t *testing.T) {
 	}
 }
 
-func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
+func TestGenerateIgnoresPreparedTaskInDirectAIMode(t *testing.T) {
 	prepared := &PreparedTask{
 		ID:              123,
 		Mode:            ModeCustom,
@@ -197,7 +197,8 @@ func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
 		Source:          "prepared",
 	}
 	repo := &fakeRepo{prepared: prepared}
-	service := NewService(repo, &fakeAI{configured: true})
+	ai := &fakeAI{configured: true}
+	service := NewService(repo, ai)
 	oge := 9
 
 	task, err := service.Generate(context.Background(), GenerateRequest{
@@ -209,11 +210,11 @@ func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if task.Question != "cached question" {
-		t.Fatalf("expected cached question, got %q", task.Question)
+	if task.Question != "generated" {
+		t.Fatalf("expected direct AI generated task, got %q", task.Question)
 	}
-	if task.Source != "prepared" {
-		t.Fatalf("expected prepared source, got %q", task.Source)
+	if task.Source != "gpt-4o-mini" {
+		t.Fatalf("expected gpt-4o-mini source, got %q", task.Source)
 	}
 	if task.Mode != ModeCustom {
 		t.Fatalf("expected mode %q, got %q", ModeCustom, task.Mode)
@@ -221,12 +222,15 @@ func TestGenerateUsesPreparedTaskFromCache(t *testing.T) {
 	if repo.created.UserID != 1 {
 		t.Fatalf("expected created user id 1, got %d", repo.created.UserID)
 	}
-	if repo.preparedUserID != 1 {
-		t.Fatalf("expected prepared lookup user id 1, got %d", repo.preparedUserID)
+	if ai.generateCalls != 1 {
+		t.Fatalf("expected one foreground AI call, got %d", ai.generateCalls)
+	}
+	if repo.getPreparedCalls != 0 {
+		t.Fatalf("expected no prepared lookup, got %d", repo.getPreparedCalls)
 	}
 }
 
-func TestGenerateRejectsInvalidPreparedTaskAndFallsBackOnDemand(t *testing.T) {
+func TestGenerateDoesNotReadInvalidPreparedTaskInDirectAIMode(t *testing.T) {
 	prepared := &PreparedTask{
 		ID:              123,
 		Mode:            ModeCustom,
@@ -260,9 +264,12 @@ func TestGenerateRejectsInvalidPreparedTaskAndFallsBackOnDemand(t *testing.T) {
 	if ai.generateCalls != 1 {
 		t.Fatalf("expected one foreground AI call, got %d", ai.generateCalls)
 	}
+	if repo.getPreparedCalls != 0 {
+		t.Fatalf("expected no prepared lookup, got %d", repo.getPreparedCalls)
+	}
 }
 
-func TestGenerateSkipsDuplicatePreparedTaskForUser(t *testing.T) {
+func TestGenerateRetriesDirectAIOnDuplicateGeneratedTask(t *testing.T) {
 	repo := &fakeRepo{
 		preparedQueue: []PreparedTask{
 			validPreparedTask(1, "duplicate question"),
@@ -283,15 +290,18 @@ func TestGenerateSkipsDuplicatePreparedTaskForUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Generate returned error: %v", err)
 	}
-	if task.Question != "fresh question" {
-		t.Fatalf("expected second prepared task, got %q", task.Question)
+	if task.Question != "generated" {
+		t.Fatalf("expected direct AI generated task, got %q", task.Question)
 	}
-	if ai.generateCalls != 0 {
-		t.Fatalf("expected no on-demand AI calls, got %d", ai.generateCalls)
+	if ai.generateCalls != 2 {
+		t.Fatalf("expected two foreground AI calls, got %d", ai.generateCalls)
+	}
+	if repo.getPreparedCalls != 0 {
+		t.Fatalf("expected no prepared lookup, got %d", repo.getPreparedCalls)
 	}
 }
 
-func TestGenerateFallsBackOnDemandAfterDuplicatePreparedTasks(t *testing.T) {
+func TestGenerateRetriesDirectAIAfterDuplicateGeneratedTasks(t *testing.T) {
 	repo := &fakeRepo{
 		preparedQueue: []PreparedTask{
 			validPreparedTask(1, "duplicate question 1"),
@@ -318,8 +328,11 @@ func TestGenerateFallsBackOnDemandAfterDuplicatePreparedTasks(t *testing.T) {
 	if task.Question != "generated" {
 		t.Fatalf("expected on-demand generated task, got %q", task.Question)
 	}
-	if ai.generateCalls != 1 {
-		t.Fatalf("expected one foreground AI call, got %d", ai.generateCalls)
+	if ai.generateCalls != 3 {
+		t.Fatalf("expected three foreground AI calls, got %d", ai.generateCalls)
+	}
+	if repo.getPreparedCalls != 0 {
+		t.Fatalf("expected no prepared lookup, got %d", repo.getPreparedCalls)
 	}
 }
 
@@ -459,6 +472,7 @@ func TestCheckStoresOriginalTaskMode(t *testing.T) {
 type fakeRepo struct {
 	prepared            *PreparedTask
 	preparedQueue       []PreparedTask
+	getPreparedCalls    int
 	preparedUserID      int64
 	created             CreateTask
 	task                Task
@@ -510,6 +524,7 @@ func (r *fakeRepo) CreatePreparedTask(_ context.Context, task CreateTask) (Prepa
 }
 
 func (r *fakeRepo) GetPreparedTask(_ context.Context, userID int64, _ Target) (PreparedTask, error) {
+	r.getPreparedCalls++
 	r.preparedUserID = userID
 	if len(r.preparedQueue) > 0 {
 		prepared := r.preparedQueue[0]
