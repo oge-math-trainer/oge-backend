@@ -635,48 +635,48 @@ func nonEmptySlice(values []string) []string {
 	return out
 }
 
-// func sanitizeAIResponse(raw string) string {
-// 	raw = strings.TrimSpace(raw)
-// 	raw = strings.TrimPrefix(raw, "```json")
-// 	raw = strings.TrimPrefix(raw, "```")
-// 	raw = strings.TrimSuffix(raw, "```")
+func sanitizeAIResponse(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
 
-// 	start := strings.Index(raw, "{")
-// 	end := strings.LastIndex(raw, "}")
-// 	if start >= 0 && end > start {
-// 		raw = raw[start : end+1]
-// 	}
+	start := strings.Index(raw, "{")
+	end := strings.LastIndex(raw, "}")
+	if start >= 0 && end > start {
+		raw = raw[start : end+1]
+	}
 
-// 	raw = strings.ReplaceAll(raw, `\ \ `, "")
-// 	raw = strings.ReplaceAll(raw, `\ \`, "")
-// 	raw = strings.ReplaceAll(raw, `\(`, "")
-// 	raw = strings.ReplaceAll(raw, `\)`, "")
-// 	raw = strings.ReplaceAll(raw, `\[`, "")
-// 	raw = strings.ReplaceAll(raw, `\]`, "")
-// 	raw = strings.ReplaceAll(raw, `\\(`, "")
-// 	raw = strings.ReplaceAll(raw, `\\)`, "")
-// 	raw = strings.ReplaceAll(raw, `\\[`, "")
-// 	raw = strings.ReplaceAll(raw, `\\]`, "")
-// 	raw = strings.ReplaceAll(raw, `\begin{cases}`, "")
-// 	raw = strings.ReplaceAll(raw, `\end{cases}`, "")
-// 	raw = strings.ReplaceAll(raw, `\\begin{cases}`, "")
-// 	raw = strings.ReplaceAll(raw, `\\end{cases}`, "")
-// 	raw = strings.ReplaceAll(raw, `\begin`, "")
-// 	raw = strings.ReplaceAll(raw, `\end`, "")
+	raw = strings.ReplaceAll(raw, `\ \ `, "")
+	raw = strings.ReplaceAll(raw, `\ \`, "")
+	raw = strings.ReplaceAll(raw, `\(`, "")
+	raw = strings.ReplaceAll(raw, `\)`, "")
+	raw = strings.ReplaceAll(raw, `\[`, "")
+	raw = strings.ReplaceAll(raw, `\]`, "")
+	raw = strings.ReplaceAll(raw, `\\(`, "")
+	raw = strings.ReplaceAll(raw, `\\)`, "")
+	raw = strings.ReplaceAll(raw, `\\[`, "")
+	raw = strings.ReplaceAll(raw, `\\]`, "")
+	raw = strings.ReplaceAll(raw, `\begin{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\end{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\\begin{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\\end{cases}`, "")
+	raw = strings.ReplaceAll(raw, `\begin`, "")
+	raw = strings.ReplaceAll(raw, `\end`, "")
 
-// 	reFrac := regexp.MustCompile(`\\frac\{([^}]+)\}\{([^}]+)\}`)
-// 	raw = reFrac.ReplaceAllString(raw, "$1/$2")
-// 	raw = regexp.MustCompile(`\\cdot`).ReplaceAllString(raw, "*")
-// 	reSqrt := regexp.MustCompile(`\\sqrt\{([^}]+)\}`)
-// 	raw = reSqrt.ReplaceAllString(raw, "sqrt($1)")
-// 	raw = regexp.MustCompile(`\\{1,2}([a-zA-Z0-9{}()^/_\-+*=])`).ReplaceAllString(raw, "$1")
-// 	raw = strings.ReplaceAll(raw, `\\`, "")
-// 	raw = strings.ReplaceAll(raw, `\`, "")
-// 	raw = strings.ReplaceAll(raw, "$", "")
-// 	raw = regexp.MustCompile(`\s+`).ReplaceAllString(raw, " ")
+	reFrac := regexp.MustCompile(`\\frac\{([^}]+)\}\{([^}]+)\}`)
+	raw = reFrac.ReplaceAllString(raw, "$1/$2")
+	raw = regexp.MustCompile(`\\cdot`).ReplaceAllString(raw, "*")
+	reSqrt := regexp.MustCompile(`\\sqrt\{([^}]+)\}`)
+	raw = reSqrt.ReplaceAllString(raw, "sqrt($1)")
+	raw = regexp.MustCompile(`\\{1,2}([a-zA-Z0-9{}()^/_\-+*=])`).ReplaceAllString(raw, "$1")
+	raw = strings.ReplaceAll(raw, `\\`, "")
+	raw = strings.ReplaceAll(raw, `\`, "")
+	raw = strings.ReplaceAll(raw, "$", "")
+	raw = regexp.MustCompile(`\s+`).ReplaceAllString(raw, " ")
 
-// 	return strings.TrimSpace(raw)
-// }
+	return strings.TrimSpace(raw)
+}
 
 func (c *Client) IsConfigured() bool {
 	return c != nil && strings.TrimSpace(c.apiKey) != "" && strings.TrimSpace(c.baseURL) != "" && strings.TrimSpace(c.model) != ""
@@ -915,16 +915,38 @@ func validUnicodeEscape(raw string, escapeIndex int) bool {
 }
 
 func normalizeGeneratedContent(result *tasks.GeneratedContent) {
-	result.Question = strings.TrimSpace(result.Question)
+	result.Question = cleanText(result.Question)
 	result.CorrectAnswer = strings.TrimSpace(result.CorrectAnswer)
-	result.SelfCheck = strings.TrimSpace(result.SelfCheck)
+	result.SelfCheck = cleanText(result.SelfCheck)
 	result.ValidationNotes = strings.TrimSpace(result.ValidationNotes)
 	if len(result.VisualData) == 0 {
 		result.VisualData = nil
 	}
 	for i, step := range result.SolutionSteps {
-		result.SolutionSteps[i] = strings.TrimSpace(step)
+		result.SolutionSteps[i] = cleanText(step)
 	}
+}
+
+func cleanText(s string) string {
+	s = strings.TrimSpace(s)
+	// убираем \left и \right
+	s = strings.ReplaceAll(s, `\left`, "")
+	s = strings.ReplaceAll(s, `\right`, "")
+	// // убираем \cdot → *
+	// s = strings.ReplaceAll(s, `\cdot`, "*")
+	// // убираем \ldots → ...
+	// s = strings.ReplaceAll(s, `\ldots`, "...")
+	// // убираем \infty → бесконечность
+	// s = strings.ReplaceAll(s, `\infty`, "бесконечность")
+	// // убираем \pm → ±
+	// s = strings.ReplaceAll(s, `\pm`, "±")
+	// // убираем \neq → ≠
+	// s = strings.ReplaceAll(s, `\neq`, "≠")
+	// // убираем \leq → <=
+	// s = strings.ReplaceAll(s, `\leq`, "<=")
+	// // убираем \geq → >=
+	// s = strings.ReplaceAll(s, `\geq`, ">=")
+	return s
 }
 
 func validateGeneratedTask(target tasks.Target, result *tasks.GeneratedContent) error {
