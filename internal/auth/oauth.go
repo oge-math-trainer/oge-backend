@@ -19,12 +19,13 @@ import (
 )
 
 const (
-	ProviderGoogle = "google"
+	ProviderGoogle = "google" // Оставлено для совместимости, но не используется
 	ProviderYandex = "yandex"
 
-	defaultGoogleAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
-	defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token"
-	defaultGoogleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
+	// Google URLs (не используются, но оставлены для компиляции)
+	// defaultGoogleAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
+	// defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token"
+	// defaultGoogleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 	defaultYandexAuthURL     = "https://oauth.yandex.ru/authorize"
 	defaultYandexTokenURL    = "https://oauth.yandex.ru/token"
@@ -36,7 +37,7 @@ const (
 )
 
 type OAuthConfig struct {
-	Google OAuthProviderConfig
+	Google OAuthProviderConfig // Оставлено для совместимости
 	Yandex OAuthProviderConfig
 }
 
@@ -96,10 +97,9 @@ func (s *Service) OAuthStart(ctx context.Context, provider string) (OAuthStart, 
 	query.Set("response_type", "code")
 	query.Set("scope", strings.Join(oauthScopes(provider), " "))
 	query.Set("state", state)
-	if provider == ProviderGoogle {
-		query.Set("access_type", "online")
-		query.Set("prompt", "select_account")
-	}
+
+	// Google-specific params удалены, так как провайдер отключен
+
 	authURL.RawQuery = query.Encode()
 
 	return OAuthStart{
@@ -157,12 +157,9 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, code, state strin
 
 func (s *Service) oauthProvider(provider string) (string, OAuthProviderConfig, error) {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case ProviderGoogle:
-		cfg := s.oauth.Google.withDefaults(ProviderGoogle)
-		if !cfg.isConfigured() {
-			return "", OAuthProviderConfig{}, app.Validation("Google OAuth is not configured")
-		}
-		return ProviderGoogle, cfg, nil
+	// Google OAuth отключён: кейс удалён
+	// case ProviderGoogle: ...
+
 	case ProviderYandex:
 		cfg := s.oauth.Yandex.withDefaults(ProviderYandex)
 		if !cfg.isConfigured() {
@@ -189,16 +186,9 @@ func (cfg OAuthProviderConfig) withDefaults(provider string) OAuthProviderConfig
 	cfg.UserInfoURL = strings.TrimSpace(cfg.UserInfoURL)
 
 	switch provider {
-	case ProviderGoogle:
-		if cfg.AuthURL == "" {
-			cfg.AuthURL = defaultGoogleAuthURL
-		}
-		if cfg.TokenURL == "" {
-			cfg.TokenURL = defaultGoogleTokenURL
-		}
-		if cfg.UserInfoURL == "" {
-			cfg.UserInfoURL = defaultGoogleUserInfoURL
-		}
+	// Google defaults удалены
+	// case ProviderGoogle: ...
+
 	case ProviderYandex:
 		if cfg.AuthURL == "" {
 			cfg.AuthURL = defaultYandexAuthURL
@@ -215,8 +205,9 @@ func (cfg OAuthProviderConfig) withDefaults(provider string) OAuthProviderConfig
 
 func oauthScopes(provider string) []string {
 	switch provider {
-	case ProviderGoogle:
-		return []string{"openid", "email", "profile"}
+	// Google scopes удалены
+	// case ProviderGoogle: return []string{"openid", "email", "profile"}
+
 	case ProviderYandex:
 		return []string{"login:email", "login:info"}
 	default:
@@ -310,6 +301,8 @@ func (s *Service) exchangeOAuthCode(ctx context.Context, provider string, cfg OA
 
 func (s *Service) fetchOAuthProfile(ctx context.Context, provider string, cfg OAuthProviderConfig, accessToken string) (oauthProfile, error) {
 	userInfoURL := cfg.UserInfoURL
+
+	// Специфичные параметры для Яндекс
 	if provider == ProviderYandex {
 		u, err := url.Parse(userInfoURL)
 		if err != nil {
@@ -326,44 +319,37 @@ func (s *Service) fetchOAuthProfile(ctx context.Context, provider string, cfg OA
 		return oauthProfile{}, app.Internal(err)
 	}
 	req.Header.Set("Accept", "application/json")
-	switch provider {
-	case ProviderGoogle:
-		req.Header.Set("Authorization", "Bearer "+accessToken)
-	case ProviderYandex:
+
+	// Заголовок авторизации только для Яндекс
+	// (кейс Google удалён)
+	if provider == ProviderYandex {
 		req.Header.Set("Authorization", "OAuth "+accessToken)
 	}
 
-	switch provider {
-	case ProviderGoogle:
-		var out struct {
-			Sub           string `json:"sub"`
-			Email         string `json:"email"`
-			EmailVerified bool   `json:"email_verified"`
-		}
-		if err := s.doOAuthJSON(req, &out); err != nil {
-			return oauthProfile{}, app.Unauthorized("Google user info request failed")
-		}
-		if !out.EmailVerified {
-			return oauthProfile{}, app.Unauthorized("Google email is not verified")
-		}
-		return oauthProfile{ID: out.Sub, Email: out.Email}, nil
-	case ProviderYandex:
-		var out struct {
-			ID           string   `json:"id"`
-			DefaultEmail string   `json:"default_email"`
-			Emails       []string `json:"emails"`
-		}
-		if err := s.doOAuthJSON(req, &out); err != nil {
-			return oauthProfile{}, app.Unauthorized("Yandex user info request failed")
-		}
-		email := out.DefaultEmail
-		if email == "" && len(out.Emails) > 0 {
-			email = out.Emails[0]
-		}
-		return oauthProfile{ID: out.ID, Email: email}, nil
-	default:
+	// Обработка ответа ТОЛЬКО для Яндекс
+	// (кейс Google удалён полностью)
+
+	// Так как oauthProvider выше уже отфильтровал всё, кроме Яндекс,
+	// мы можем смело обрабатывать только этот кейс.
+
+	// Для надёжности оставляем проверку, но по логике сюда придёт только Yandex
+	if provider != ProviderYandex {
 		return oauthProfile{}, app.Validation("Unsupported OAuth provider")
 	}
+
+	var out struct {
+		ID           string   `json:"id"`
+		DefaultEmail string   `json:"default_email"`
+		Emails       []string `json:"emails"`
+	}
+	if err := s.doOAuthJSON(req, &out); err != nil {
+		return oauthProfile{}, app.Unauthorized("Yandex user info request failed")
+	}
+	email := out.DefaultEmail
+	if email == "" && len(out.Emails) > 0 {
+		email = out.Emails[0]
+	}
+	return oauthProfile{ID: out.ID, Email: email}, nil
 }
 
 func (s *Service) doOAuthJSON(req *http.Request, dst any) error {
