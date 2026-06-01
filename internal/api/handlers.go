@@ -260,6 +260,7 @@ func (s *Server) handleTaskGenerate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
+	log.Printf("TASK RESPONSE: %+v", task)
 	writeSuccess(w, http.StatusOK, task)
 }
 
