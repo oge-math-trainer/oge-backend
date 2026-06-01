@@ -2,6 +2,7 @@ package tasks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -45,6 +46,26 @@ type GraphInfo struct {
 // }
 
 type VisualData map[string]any
+
+func (v *VisualData) UnmarshalJSON(data []byte) error {
+	// если пришёл массив — игнорируем
+	if len(data) > 0 && data[0] == '[' {
+		*v = nil
+		return nil
+	}
+	// если null или пустой объект — nil
+	if string(data) == "null" || string(data) == "{}" {
+		*v = nil
+		return nil
+	}
+	// иначе парсим как обычный map
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	*v = m
+	return nil
+}
 
 type Task struct {
 	ID              int64       `json:"id"`
