@@ -20,7 +20,7 @@ const (
 
 	// Temporary mode: generate user-facing tasks directly with AI and do not use
 	// the prepared_tasks bank.
-	DirectAIGeneration = true
+	DirectAIGeneration = false // ← ИЗМЕНЕНО: false = включаем кэш и предгенерацию
 )
 
 type Target struct {
