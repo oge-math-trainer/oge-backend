@@ -163,30 +163,30 @@ func (s *Service) generateNextTask(
 		return tasks.Task{}, len(existingTasks), true, nil
 	}
 
-	var lastErr error
-	for _, target := range targets {
-		if _, exists := generatedOgeNumbers[target.OgeNumber]; exists {
-			continue
+	// Найти самый низкий еще не сгенерированный OgeNumber
+	var nextTarget *tasks.Target
+	for i := range targets {
+		if _, exists := generatedOgeNumbers[targets[i].OgeNumber]; !exists {
+			nextTarget = &targets[i]
+			break // Берем только первый (самый низкий) не сгенерированный номер
 		}
-
-		task, err := s.generateTaskForTarget(ctx, userID, target)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		if err := s.repo.AttachTaskToSession(ctx, sessionID, task.ID); err != nil {
-			return tasks.Task{}, len(existingTasks), false, err
-		}
-
-		generatedCount := len(existingTasks) + 1
-		return task, generatedCount, generatedCount >= len(targets), nil
 	}
 
-	if lastErr != nil {
-		return tasks.Task{}, len(existingTasks), false, lastErr
+	if nextTarget == nil {
+		return tasks.Task{}, len(existingTasks), true, nil
 	}
-	return tasks.Task{}, len(existingTasks), true, nil
+
+	task, err := s.generateTaskForTarget(ctx, userID, *nextTarget)
+	if err != nil {
+		return tasks.Task{}, len(existingTasks), false, err
+	}
+
+	if err := s.repo.AttachTaskToSession(ctx, sessionID, task.ID); err != nil {
+		return tasks.Task{}, len(existingTasks), false, err
+	}
+
+	generatedCount := len(existingTasks) + 1
+	return task, generatedCount, generatedCount >= len(targets), nil
 }
 
 func (s *Service) generateTaskForTarget(ctx context.Context, userID int64, target tasks.Target) (tasks.Task, error) {
